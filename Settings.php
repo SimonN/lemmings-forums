@@ -20,16 +20,16 @@ $mmessage = 'Currently updating the forum software. Check back soon! :)';		# Des
 ########## Forum Info ##########
 $mbname = 'Lemmings Forums';		# The name of your forum.
 $language = 'english';		# The default language file set for the forum.
-$boardurl = 'http://www.lemmingsforums.net';		# URL to your forum's folder. (without the trailing /!)
-$webmaster_email = 'hayanninja@yandex.com';		# Email address to send emails from. (like noreply@yourdomain.com.)
+$boardurl = 'http://namida-webdev:9998/';		# URL to your forum's folder. (without the trailing /!)
+$webmaster_email = 'namida.verasche@gmail.com';		# Email address to send emails from. (like noreply@yourdomain.com.)
 $cookiename = 'LFCookie42';		# Name of the cookie to set for authentication.
 
 ########## Database Info ##########
 $db_type = 'mysql';
-$db_server = 'lemforums.db';
+$db_server = 'localhost';
 $db_name = 'LemForums';
-$db_user = 'LemmForums';
-$db_passwd = '';
+$db_user = 'LemForums';
+$db_passwd = 'password';
 $ssi_db_user = '';
 $ssi_db_passwd = '';
 $db_prefix = 'lf_';
@@ -38,7 +38,7 @@ $db_error_send = 0;
 
 ########## Directories/Files ##########
 # Note: These directories do not have to be changed unless you move things.
-$boarddir = '/home/public';		# The absolute path to the forum's folder. (not just '.'!)
+$boarddir = '/var/www/lemmingsforums.net/public/';		# The absolute path to the forum's folder. (not just '.'!)
 $sourcedir = 'Sources';		# Path to the Sources directory.
 $cachedir = 'cache';		# Path to the cache directory.
 
