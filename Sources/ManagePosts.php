@@ -8,7 +8,7 @@
  * @copyright 2011 Simple Machines
  * @license http://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0
+ * @version 2.0.12
  */
 
 if (!defined('SMF'))
@@ -163,6 +163,9 @@ function SetCensor()
 	for ($i = 0, $n = count($censor_vulgar); $i < $n; $i++)
 	{
 		if (empty($censor_vulgar[$i]))
+			continue;
+
+		if (empty($censor_proper[$i]))
 			continue;
 
 		// Skip it, it's either spaces or stars only.

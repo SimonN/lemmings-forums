@@ -8,7 +8,7 @@
  * @copyright 2011 Simple Machines
  * @license http://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.10
+ * @version 2.0.15
  */
 
 // Don't do anything if SMF is already loaded.
@@ -23,6 +23,7 @@ global $boardurl, $boarddir, $sourcedir, $webmaster_email, $cookiename;
 global $db_server, $db_name, $db_user, $db_prefix, $db_persist, $db_error_send, $db_last_error;
 global $db_connection, $modSettings, $context, $sc, $user_info, $topic, $board, $txt;
 global $smcFunc, $ssi_db_user, $scripturl, $ssi_db_passwd, $db_passwd, $cachedir;
+global $image_proxy_enabled, $image_proxy_secret, $image_proxy_maxsize;
 
 // Remember the current configuration so it can be set back.
 $ssi_magic_quotes_runtime = function_exists('get_magic_quotes_gpc') && get_magic_quotes_runtime();
@@ -1028,7 +1029,7 @@ function ssi_login($redirect_to = '', $output_method = 'echo')
 
 	echo '<tr>
 					<td><input type="hidden" name="cookielength" value="-1" /></td>
-					<td><input type="submit" value="', $txt['login'], '" class="button_submit" /></td>
+					<td><input type="hidden" name="', $context['session_var'], '" value="', $context['session_id'], '" /><input type="submit" value="', $txt['login'], '" class="button_submit" /></td>
 				</tr>
 			</table>
 		</form>';

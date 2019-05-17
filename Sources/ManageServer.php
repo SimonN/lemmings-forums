@@ -8,7 +8,7 @@
  * @copyright 2011 Simple Machines
  * @license http://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.10
+ * @version 2.0.15
  */
 
 if (!defined('SMF'))
@@ -206,6 +206,8 @@ function ModifyGeneralSettings($return_config = false)
 {
 	global $scripturl, $context, $txt;
 
+	loadLanguage('Install');
+
 	/* If you're writing a mod, it's a bad idea to add things here....
 	For each option:
 		variable name, description, type (constant), size/possible values, helptext.
@@ -223,6 +225,12 @@ function ModifyGeneralSettings($return_config = false)
 		array('enableCompressedOutput', $txt['enableCompressedOutput'], 'db', 'check', null, 'enableCompressedOutput'),
 		array('disableTemplateEval', $txt['disableTemplateEval'], 'db', 'check', null, 'disableTemplateEval'),
 		array('disableHostnameLookup', $txt['disableHostnameLookup'], 'db', 'check', null, 'disableHostnameLookup'),
+		'',
+		array('image_proxy_enabled', $txt['image_proxy_enabled'], 'file', 'check', null, 'image_proxy_enabled', 'subtext' => $txt['image_proxy_enabled_desc']),
+		array('image_proxy_secret', $txt['image_proxy_secret'], 'file', 'text', 30, 'image_proxy_secret', 'subtext' => $txt['image_proxy_secret_desc']),
+		array('image_proxy_maxsize', $txt['image_proxy_maxsize'], 'file', 'int', null, 'image_proxy_maxsize', 'postinput' => $txt['image_proxy_maxsize_postinput'], 'subtext' => $txt['image_proxy_maxsize_desc']),
+		'',
+		array('enable_sm_stats', $txt['install_settings_stats'], 'db', 'check', null),
 	);
 
 	if ($return_config)
@@ -235,6 +243,16 @@ function ModifyGeneralSettings($return_config = false)
 	// Saving settings?
 	if (isset($_REQUEST['save']))
 	{
+		// Are we saving the stat collection?
+		if (!empty($_POST['enable_sm_stats']) && empty($modSettings['sm_stats_key']))
+		{
+			$registerSMStats = registerSMStats();
+
+			// Failed to register, disable it again.
+			if (empty($registerSMStats))
+				$_POST['enable_sm_stats'] = 0;
+		}
+
 		saveSettings($config_vars);
 		redirectexit('action=admin;area=serversettings;sa=general;' . $context['session_var'] . '=' . $context['session_id']);
 	}
@@ -1812,7 +1830,9 @@ function prepareServerSettingsContext(&$config_vars)
 				'invalid' => false,
 				'javascript' => '',
 				'preinput' => '',
-				'postinput' => '',
+				'postinput' => isset($config_var['postinput']) ? $config_var['postinput'] : '',
+				'subtext' => isset($config_var['subtext']) ? $config_var['subtext'] : '',
+				'needs_default' => !empty($config_var['needs_default']) || in_array($config_var[0], array('db_persist', 'db_error_send', 'maintenance', 'image_proxy_enabled')) ? true : false,
 			);
 		}
 	}
@@ -1872,7 +1892,7 @@ function prepareDBSettingContext(&$config_vars)
 				if ($config_var[0] == 'select' && !empty($config_var['multiple']))
 				{
 					$context['config_vars'][$config_var[1]]['name'] .= '[]';
-					$context['config_vars'][$config_var[1]]['value'] = !empty($context['config_vars'][$config_var[1]]['value']) ? unserialize($context['config_vars'][$config_var[1]]['value']) : array();
+					$context['config_vars'][$config_var[1]]['value'] = !empty($context['config_vars'][$config_var[1]]['value']) ? safe_unserialize($context['config_vars'][$config_var[1]]['value']) : array();
 				}
 
 				// If it's associative
@@ -2003,14 +2023,17 @@ function saveSettings(&$config_vars)
 		'webmaster_email',
 		'db_name', 'db_user', 'db_server', 'db_prefix', 'ssi_db_user',
 		'boarddir', 'sourcedir', 'cachedir',
+		'image_proxy_secret',
 	);
 	// All the numeric variables.
 	$config_ints = array(
+		'cache_enable',
+		'image_proxy_maxsize',
 	);
 	// All the checkboxes.
 	$config_bools = array(
 		'db_persist', 'db_error_send',
-		'maintenance',
+		'maintenance', 'image_proxy_enabled',
 	);
 
 	// Now sort everything into a big array, and figure out arrays and etc.
@@ -2034,7 +2057,7 @@ function saveSettings(&$config_vars)
 	{
 		if (!empty($_POST[$key]))
 			$new_settings[$key] = '1';
-		else
+		elseif (isset($_POST[$key]))
 			$new_settings[$key] = '0';
 	}
 
@@ -2130,6 +2153,56 @@ function saveDBSettings(&$config_vars)
 		require_once($sourcedir . '/ManagePermissions.php');
 		save_inline_permissions($inlinePermissions);
 	}
+}
+
+
+/**
+ * Registers the site with the Simple Machines Stat collection. This function
+ * purposely does not use updateSettings.php as it will be called shortly after
+ * this process completes by the saveSettings() function.
+ *
+ * @see Stats.php SMStats() for more information.
+ * @link https://www.simplemachines.org/about/stats.php for more info.
+ *
+ */
+function registerSMStats()
+{
+	global $modSettings, $boardurl, $smcFunc;
+
+	// Already have a key?  Can't register again.
+	if (!empty($modSettings['sm_stats_key']))
+		return true;
+
+	$fp = @fsockopen('www.simplemachines.org', 80, $errno, $errstr);
+	if ($fp)
+	{
+		$out = 'GET /smf/stats/register_stats.php?site=' . base64_encode($boardurl) . ' HTTP/1.1' . "\r\n";
+		$out .= 'Host: www.simplemachines.org' . "\r\n";
+		$out .= 'Connection: Close' . "\r\n\r\n";
+		fwrite($fp, $out);
+
+		$return_data = '';
+		while (!feof($fp))
+			$return_data .= fgets($fp, 128);
+
+		fclose($fp);
+
+		// Get the unique site ID.
+		preg_match('~SITE-ID:\s(\w{10})~', $return_data, $ID);
+
+		if (!empty($ID[1]))
+		{
+			$smcFunc['db_insert']('replace',
+				'{db_prefix}settings',
+				array('variable' => 'string', 'value' => 'string'),
+				array('sm_stats_key', $ID[1]),
+				array('variable')
+			);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 ?>

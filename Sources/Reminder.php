@@ -8,7 +8,7 @@
  * @copyright 2011 Simple Machines
  * @license http://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.4
+ * @version 2.0.14
  */
 
 if (!defined('SMF'))
@@ -67,6 +67,9 @@ function RemindPick()
 	global $context, $txt, $scripturl, $sourcedir, $user_info, $webmaster_email, $smcFunc, $language, $modSettings;
 
 	checkSession();
+
+	$_POST['user'] = isset($_POST['user']) ? $smcFunc['htmlspecialchars']($_POST['user']) : '';
+	$_REQUEST['uid'] = (int) isset($_REQUEST['uid']) ? $_REQUEST['uid'] : 0;
 
 	// Coming with a known ID?
 	if (!empty($_REQUEST['uid']))
@@ -179,7 +182,7 @@ function RemindPick()
 // Set your new password
 function setPassword()
 {
-	global $txt, $context;
+	global $txt, $context, $smcFunc;
 
 	loadLanguage('Login');
 
@@ -191,7 +194,7 @@ function setPassword()
 	$context += array(
 		'page_title' => $txt['reminder_set_password'],
 		'sub_template' => 'set_password',
-		'code' => $_REQUEST['code'],
+		'code' => $smcFunc['htmlspecialchars']($_REQUEST['code']),
 		'memID' => (int) $_REQUEST['u']
 	);
 }

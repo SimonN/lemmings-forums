@@ -8,7 +8,7 @@
  * @copyright 2011 Simple Machines
  * @license http://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.10
+ * @version 2.0.12
  */
 
 // This won't be dedicated without this - this must exist in each gateway!
@@ -141,7 +141,7 @@ class paypal_payment
 			$requestString .= '&' . $k . '=' . urlencode($v);
 
 		// Can we use curl?
-		if (function_exists('curl_init') && $curl = curl_init((!empty($modSettings['paidsubs_test']) ? 'https://www.sandbox.' : 'http://www.') . 'paypal.com/cgi-bin/webscr'))
+				if (function_exists('curl_init') && $curl = curl_init((!empty($modSettings['paidsubs_test']) ? 'https://www.sandbox.' : 'https://www.') . 'paypal.com/cgi-bin/webscr'))
 		{
 			// Set the post data.
 			curl_setopt($curl, CURLOPT_POST, true);
@@ -180,7 +180,7 @@ class paypal_payment
 			if (!empty($modSettings['paidsubs_test']))
 				$fp = fsockopen('ssl://www.sandbox.paypal.com', 443, $errno, $errstr, 30);
 			else
-				$fp = fsockopen('www.paypal.com', 80, $errno, $errstr, 30);
+				$fp = fsockopen('ssl://www.paypal.com', 443, $errno, $errstr, 30);
 
 			// Did it work?
 			if (!$fp)
