@@ -6,6 +6,7 @@
 
   RewriteRule \.htaccess - [L,NC,R=404]
   RewriteRule ^\.git - [L,NC,R=404]
+  RewriteRule ^\backup.sh - [L,NC,R=404]
 </IfModule>
 
 # Disable directory browsing
