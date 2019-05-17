@@ -34,7 +34,7 @@ $ssi_db_user = '';
 $ssi_db_passwd = '';
 $db_prefix = 'lf_';
 $db_persist = 0;
-$db_error_send = 0;
+$db_error_send = 1;
 
 ########## Directories/Files ##########
 # Note: These directories do not have to be changed unless you move things.
@@ -56,4 +56,6 @@ if (!file_exists($cachedir) && file_exists($boarddir . '/cache'))
 	$cachedir = $boarddir . '/cache';
 
 $db_character_set = 'utf8';
+$image_proxy_secret = '9cf837592498f50d4de4';
+$image_proxy_maxsize = 5190;
 ?>
