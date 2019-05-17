@@ -4,6 +4,8 @@ MYSQL_USERNAME=""
 MYSQL_PASSWORD=""
 DATESTAMP=`date +'%Y-%m-%d'`
 
+cd /var/www/lemmingsforums.net/public/
+
 mkdir ../private/backup
 
 tar -cf ../private/backup/attachments.tar attachments*/*
