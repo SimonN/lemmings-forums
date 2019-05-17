@@ -8,8 +8,8 @@ DATESTAMP=`date +'%Y-%m-%d'`
 cd /var/www/lemmingsforums.net/public/
 mkdir ../private/backup
 
-rclone copy gdrive:log.txt ../private/backup/
-IFS=$'\n' read -d '' -r -a BACKUP_DATES < ../private/backup/log.txt
+rclone copy gdrive:lf-log.txt ../private/backup/
+IFS=$'\n' read -d '' -r -a BACKUP_DATES < ../private/backup/lf-log.txt
 
 tar -cf ../private/backup/attachments.tar attachments*/*
 tar -cf ../private/backup/pm-attachments.tar pm_attachments*/*
@@ -35,5 +35,5 @@ fi
 
 BACKUP_DATES+=( "${DATESTAMP}" )
 
-printf "%s\n" "${BACKUP_DATES[@]}" > log.txt
-rclone move log.txt gdrive:
+printf "%s\n" "${BACKUP_DATES[@]}" > lf-log.txt
+rclone move lf-log.txt gdrive:
