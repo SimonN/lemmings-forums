@@ -2142,6 +2142,7 @@ function getLanguages($use_cache = true, $favor_utf8 = true)
 function &nukeSpoilers(&$text)
 {
   $text = preg_replace("/\[spoiler(=.*?)?\].*?\\[\/spoiler\]/", "(Spoiler redacted - please go on site to view.)", $text);
+	$text = preg_replace("/\[\/spoiler]/", "", $text);
 	return $text;
 }
 
