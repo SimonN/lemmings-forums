@@ -907,14 +907,14 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 	//
 	// PM Attachments MOD BEGIN
 	//
-	
+
 	$str_downloads = '';
-	$str_attachments = '';	
-	
+	$str_attachments = '';
+
 	if (count($attachments) >= 1)
 	{
 		$parent_attachments = array();
-		
+
 		$request = $smcFunc['db_query']('', '
 			SELECT
 				id_attach
@@ -930,9 +930,9 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		{
 			$parent_attachments[] = $row['id_attach'];
 		}
-		
+
 		$smcFunc['db_free_result']($request);
-	
+
 		// obtain string of all attach_ids...
 		$str_attachments = implode(',', $parent_attachments);
 		$xStr = 0;
@@ -945,7 +945,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 	//
 	// PM Attachments MOD END
 	//
-		
+
 	// Integrated PMs
 	call_integration_hook('integrate_personal_message', array($recipients, $from['username'], $subject, $message));
 
@@ -1189,7 +1189,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		//
 		// PM ATTACHMENTS MOD BEGIN
 		//
-		
+
 		// Fix the attachments.
 		if (!empty($attachments))
 			// is it being reported?
@@ -1217,7 +1217,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		//
 		// PM ATTACHMENTS MOD END
 		//
-		
+
 		// If this is new we need to set it part of it's own conversation.
 		if (empty($pm_head))
 			$smcFunc['db_query']('', '
@@ -1255,6 +1255,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 	}
 
 	censorText($message);
+	nukeSpoilers($message);
 	censorText($subject);
 	$message = trim(un_htmlspecialchars(strip_tags(strtr(parse_bbc($smcFunc['htmlspecialchars']($message), false), array('<br />' => "\n", '</div>' => "\n", '</li>' => "\n", '&#91;' => '[', '&#93;' => ']')))));
 
@@ -1266,22 +1267,22 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		// Replace the right things in the message strings.
 		$mailsubject = str_replace(array('SUBJECT', 'SENDER'), array($subject, un_htmlspecialchars($from['name'])), $txt['new_pm_subject']);
 		$mailmessage = str_replace(array('SUBJECT', 'MESSAGE', 'SENDER'), array($subject, $message, un_htmlspecialchars($from['name'])), $txt['pm_email']);
-		
+
 		//
 		// PM ATTACHMENTS MOD Begin...
 		//
-		
+
 		$mailmessage .= "\n";
 		if (!empty($parent_attachments))
 		{
 			$mailmessage .= "\n" . $txt['pmattachments_mail'] . "\n";
-			
+
 			foreach ($parent_attachments as $attachID)
-				$mailmessage .= $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachID . "\n";		
+				$mailmessage .= $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachID . "\n";
 		}
 
 		$mailmessage .= "\n" . $txt['instant_reply'] . ' ' . $scripturl . '?action=pm;sa=send;f=inbox;pmsg=' . $id_pm . ';quote;u=' . $from['id'];
-		
+
 		//
 		// PM ATTACHMENTS MOD END!
 		//
@@ -1651,6 +1652,7 @@ function sendNotifications($topics, $type, $exclude = array(), $members_only = a
 		// Clean it up.
 		censorText($row['subject']);
 		censorText($row['body']);
+		nukeSpoilers($row['body']);
 		$row['subject'] = un_htmlspecialchars($row['subject']);
 		$row['body'] = trim(un_htmlspecialchars(strip_tags(strtr(parse_bbc($row['body'], false, $row['id_last_msg']), array('<br />' => "\n", '</div>' => "\n", '</li>' => "\n", '&#91;' => '[', '&#93;' => ']')))));
 
@@ -2940,6 +2942,7 @@ function sendApprovalNotifications(&$topicData)
 	{
 		censorText($topicData[$topic][$msgKey]['subject']);
 		censorText($topicData[$topic][$msgKey]['body']);
+		nukeSpoilers($topicData[$topic][$msgKey]['body']);
 		$topicData[$topic][$msgKey]['subject'] = un_htmlspecialchars($topicData[$topic][$msgKey]['subject']);
 		$topicData[$topic][$msgKey]['body'] = trim(un_htmlspecialchars(strip_tags(strtr(parse_bbc($topicData[$topic][$msgKey]['body'], false), array('<br />' => "\n", '</div>' => "\n", '</li>' => "\n", '&#91;' => '[', '&#93;' => ']')))));
 
@@ -3390,7 +3393,7 @@ function time_format__preg_callback($matches)
 {
 	return '[time]' . timeformat($matches[1], false) . '[/time]';
 }
-		
+
 		// !!!
 function createPMAttachment(&$pmAttachmentOptions)
 {
@@ -3428,7 +3431,7 @@ function createPMAttachment(&$pmAttachmentOptions)
 		$pmAttachmentOptions['errors'] = array('could_not_upload');
 		return false;
 	}
-	
+
 	// [PM] These are the only valid image types for SMF. [PM]
 	$validImageTypes = array(1 => 'gif', 2 => 'jpeg', 3 => 'png', 5 => 'psd', 6 => 'bmp', 7 => 'tiff', 8 => 'tiff', 9 => 'jpeg', 14 => 'iff');
 
@@ -3451,7 +3454,7 @@ function createPMAttachment(&$pmAttachmentOptions)
 
 	// PM Attachments BEGIN...  Just here to be sure Subs.php gets loaded.
 	require_once($sourcedir . '/Subs.php');
-	
+
 	// [PM] Get the hash if no hash has been given yet. [PM]
 	if (empty($pmAttachmentOptions['file_hash']))
 		$pmAttachmentOptions['file_hash'] = getPMAttachmentFilename($pmAttachmentOptions['name'], false, null, true);
