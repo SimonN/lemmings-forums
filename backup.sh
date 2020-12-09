@@ -5,7 +5,7 @@ MYSQL_USERNAME=""
 MYSQL_PASSWORD=""
 DATESTAMP=`date +'%Y-%m-%d'`
 
-cd /var/www/lemmingsforums.net/public/
+cd /home/lemmingsforums.net/www/public/
 mkdir ../private/backup
 
 rclone copy gdrive:lf-log.txt ../private/backup/
