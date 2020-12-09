@@ -20,8 +20,8 @@ $mmessage = 'Currently updating the forum software. Check back soon! :)';		# Des
 ########## Forum Info ##########
 $mbname = 'Lemmings Forums';		# The name of your forum.
 $language = 'english';		# The default language file set for the forum.
-$boardurl = 'http://namidawebvm:9998';		# URL to your forum's folder. (without the trailing /!)
-$webmaster_email = 'namida.verasche@gmail.com';		# Email address to send emails from. (like noreply@yourdomain.com.)
+$boardurl = 'http://www.lemmingsforums.net';		# URL to your forum's folder. (without the trailing /!)
+$webmaster_email = 'noreply@lemmingsforums.net';		# Email address to send emails from. (like noreply@yourdomain.com.)
 $cookiename = 'LFCookie42';		# Name of the cookie to set for authentication.
 
 ########## Database Info ##########
