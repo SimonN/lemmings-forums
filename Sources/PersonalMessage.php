@@ -4334,18 +4334,20 @@ else
 			else
 				return chr(240 | $n >> 18) . chr(128 | $n >> 12 & 63) . chr(128 | $n >> 6 & 63) . chr(128 | $n & 63);');
 
-		// Different browsers like different standards...
+		$disposition = !isset($_REQUEST['image']) ? 'attachment' : 'inline';
+
+        // Different browsers like different standards...
 		if ($context['browser']['is_firefox'])
-			header('Content-Disposition: attachment; filename*="UTF-8\'\'' . preg_replace('~&#(\d{3,8});~e', '$fixchar(\'$1\')', $utf8name) . '"');
+			header('Content-Disposition: ' . $disposition . '; filename*=UTF-8\'\'' . rawurlencode(preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name)));
 
 		elseif ($context['browser']['is_opera'])
-			header('Content-Disposition: attachment; filename="' . preg_replace('~&#(\d{3,8});~e', '$fixchar(\'$1\')', $utf8name) . '"');
+			header('Content-Disposition: ' . $disposition . '; filename="' . preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name) . '"');
 
 		elseif ($context['browser']['is_ie'])
-			header('Content-Disposition: attachment; filename="' . urlencode(preg_replace('~&#(\d{3,8});~e', '$fixchar(\'$1\')', $utf8name)) . '"');
+			header('Content-Disposition: ' . $disposition . '; filename="' . urlencode(preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name)) . '"');
 
 		else
-			header('Content-Disposition: attachment; filename="' . $utf8name . '"');
+			header('Content-Disposition: ' . $disposition . '; filename="' . $utf8name . '"');
 	}
 
 	// If this has an "image extension" - but isn't actually an image - then ensure it isn't cached cause of silly IE.
