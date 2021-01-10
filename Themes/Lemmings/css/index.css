@@ -33,7 +33,7 @@ table
 /* Set a fontsize that will look the same in all browsers. */
 body
 {
-	background: #E9EEF2 url(../images/theme/backdrop.png) repeat;
+	background: #311000 url(../images/theme/backdrop.png) repeat;
 	font: 78%/130% "Verdana", "Arial", "Helvetica", sans-serif;
 	margin: 0 auto;
 	padding: 15px 0;
@@ -809,7 +809,7 @@ h4.titlebg img.icon
 }
 div.cat_bar
 {
-	background: #99abbf url(../images/theme/main_block.png) no-repeat 0 -160px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -160px;
 	padding-left: 9px;
 	height: 31px;
 	overflow: hidden;
@@ -828,12 +828,12 @@ div.title_bar
 
 div.roundframe div.cat_bar
 {
-	background: #99abbf url(../images/theme/main_block.png) no-repeat 0 -240px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -240px;
 	margin-bottom: 0;
 }
 div.roundframe div.cat_bar h3.catbg
 {
-	background: url(../images/theme/main_block.png) no-repeat 100% -240px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 100% -240px;
 }
 div.title_barIC
 {
@@ -845,7 +845,7 @@ div.title_barIC
 }
 div.title_barIC h4.titlebg
 {
-	background: url(../images/theme/main_block.png) no-repeat 100% -120px;
+	background: #c2dec5 url(../images/theme/main_block.png) no-repeat 100% -120px;
 }
 #upshrinkHeaderIC p.pminfo
 {
@@ -1338,7 +1338,7 @@ ul#navigation li
 /* the framing graphics */
 #header
 {
-	background: url(../images/theme/main_block.png) no-repeat 0 -480px;
+	background: #E6E6E6 url(../images/theme/main_block.png) no-repeat 0 -480px;
 	padding-left: 20px;
 }
 #header div.frame
