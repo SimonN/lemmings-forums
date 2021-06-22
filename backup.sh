@@ -15,7 +15,7 @@ tar -cf ../private/backup/attachments.tar attachments*/*
 tar -cf ../private/backup/pm-attachments.tar pm_attachments*/*
 
 cd ../private/backup/
-mysqldump -u $MYSQL_USERNAME -p$MYSQL_PASSWORD --databases LemForums --result-file=LemmingsForums_${DATESTAMP}.sql
+mysqldump -u $MYSQL_USERNAME -p$MYSQL_PASSWORD --databases lemforums --result-file=LemmingsForums_${DATESTAMP}.sql
 
 tar -czf LemmingsForums_${DATESTAMP}_Database.tar.gz LemmingsForums_${DATESTAMP}.sql
 rm LemmingsForums_${DATESTAMP}.sql

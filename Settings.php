@@ -15,7 +15,7 @@
 # Note: If $maintenance is set to 2, the forum will be unusable!  Change it to 0 to fix it.
 $maintenance = 0;		# Set to 1 to enable Maintenance Mode, 2 to make the forum untouchable. (you'll have to make it 0 again manually!)
 $mtitle = 'Maintenance Mode';		# Title for the Maintenance Mode message.
-$mmessage = 'Currently updating the forum software. Check back soon! :)';		# Description of why the forum is in maintenance mode.
+$mmessage = 'Currently in the process of moving to a new server. Check back soon! :)';		# Description of why the forum is in maintenance mode.
 
 ########## Forum Info ##########
 $mbname = 'Lemmings Forums';		# The name of your forum.
@@ -38,7 +38,7 @@ $db_error_send = 0;
 
 ########## Directories/Files ##########
 # Note: These directories do not have to be changed unless you move things.
-$boarddir = '/var/www/lemmingsforums.net/public/';		# The absolute path to the forum's folder. (not just '.'!)
+$boarddir = '';		# The absolute path to the forum's folder. (not just '.'!)
 $sourcedir = 'Sources';		# Path to the Sources directory.
 $cachedir = 'cache';		# Path to the cache directory.
 
@@ -59,4 +59,5 @@ $db_character_set = 'utf8';
 $upgradeData = "YTo4OntzOjI6ImlkIjtzOjE6IjEiO3M6NDoibmFtZSI7czo2OiJuYW1pZGEiO3M6NDoicGFzcyI7aTo3ODk4O3M6Nzoic3RhcnRlZCI7aToxNTU4MDU5NDQzO3M6NzoidXBkYXRlZCI7aToxNTU4MDYwNzQ3O3M6NzoidmVyc2lvbiI7czo1OiIyLjAuOSI7czo0OiJzdGVwIjtpOjM7czo3OiJzdWJzdGVwIjtpOjA7fQ==";
 $image_proxy_secret = '9b9c2b37f942bb4be9d3';
 $image_proxy_maxsize = 5190;
+$auth_secret = '5e8a43052fa1c935d3b6f9c131008958b72b454c9834bb5ca994e71a1310165c';
 ?>
