@@ -1920,6 +1920,8 @@ function create_control_verification(&$verificationOptions, $do_test = false)
 			'image_href' => $scripturl . '?action=verificationcode;vid=' . $verificationOptions['id'] . ';rand=' . md5(mt_rand()),
 			'text_value' => '',
 			'questions' => array(),
+            'use_recaptcha' => !empty($modSettings['recaptcha_enabled']),
+
 		);
 	$thisVerification = &$context['controls']['verification'][$verificationOptions['id']];
 
@@ -1931,7 +1933,7 @@ function create_control_verification(&$verificationOptions, $do_test = false)
 			// ]]></script>';
 
 	// Is there actually going to be anything?
-	if (empty($thisVerification['show_visual']) && empty($thisVerification['number_questions']))
+	if (empty($thisVerification['show_visual']) && empty($thisVerification['number_questions']) && empty($thisVerification['use_recaptcha']))
 		return false;
 	elseif (!$isNew && !$do_test)
 		return true;
@@ -1983,6 +1985,24 @@ function create_control_verification(&$verificationOptions, $do_test = false)
 		// ... nor this!
 		if ($thisVerification['number_questions'] && (!isset($_SESSION[$verificationOptions['id'] . '_vv']['q']) || !isset($_REQUEST[$verificationOptions['id'] . '_vv']['q'])))
 			fatal_lang_error('no_access', false);
+
+
+		//reCAPTCHA Verification
+        if(!empty($modSettings['recaptcha_enabled']) && ($modSettings['recaptcha_enabled'] == 1 && !empty($modSettings['recaptcha_public_key']) && !empty($modSettings['recaptcha_private_key'])))
+        {
+            $recaptcha = new \ReCaptcha\ReCaptcha($modSettings['recaptcha_private_key']);
+
+            // Was there a reCAPTCHA response?
+            if(isset($_REQUEST["g-recaptcha-response"]))
+            {
+                $resp = $recaptcha->verify($_REQUEST["g-recaptcha-response"], $_SERVER["REMOTE_ADDR"]);
+
+                if (!$resp->isSuccess())
+                    $verification_errors[] = 'wrong_verification_code';
+            }
+            else
+                $verification_errors[] = 'need_verification_code';
+        }
 
 		if ($thisVerification['show_visual'] && (empty($_REQUEST[$verificationOptions['id'] . '_vv']['code']) || empty($_SESSION[$verificationOptions['id'] . '_vv']['code']) || strtoupper($_REQUEST[$verificationOptions['id'] . '_vv']['code']) !== $_SESSION[$verificationOptions['id'] . '_vv']['code']))
 			$verification_errors[] = 'wrong_verification_code';
