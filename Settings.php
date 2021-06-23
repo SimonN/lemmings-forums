@@ -15,7 +15,7 @@
 # Note: If $maintenance is set to 2, the forum will be unusable!  Change it to 0 to fix it.
 $maintenance = 0;		# Set to 1 to enable Maintenance Mode, 2 to make the forum untouchable. (you'll have to make it 0 again manually!)
 $mtitle = 'Maintenance Mode';		# Title for the Maintenance Mode message.
-$mmessage = 'Currently in the process of moving to a new server. Check back soon! :)';		# Description of why the forum is in maintenance mode.
+$mmessage = 'The forum software is currently being upgraded. Check back soon.';		# Description of why the forum is in maintenance mode.
 
 ########## Forum Info ##########
 $mbname = 'Lemmings Forums';		# The name of your forum.
