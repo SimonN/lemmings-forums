@@ -304,13 +304,13 @@ function template_control_verification($verify_id, $display_type = 'all', $reset
 			<div id="verification_control_', $i, '" class="verification_control">';
 
 
-        if ($i == 0 && $verify_context['use_recaptcha'])
-        {
-            // Render the reCAPTCHA Widget. Also, add a hidden form element so we pass back the "*_vv" values expected
-            //by some of the CAPTCHA-checking code in SMF to trigger the verification routines.
-            echo '<div class="g-recaptcha" data-sitekey="', $modSettings['recaptcha_public_key'], '" data-theme="', $modSettings['recaptcha_theme'] ,'"></div>
-              <input type="hidden" name="', $verify_id, '_vv[recaptcha]" value="true">';
-        }
+    if ($i == 0 && $verify_context['use_recaptcha'])
+    {
+        // Render the reCAPTCHA Widget. Also, add a hidden form element so we pass back the "*_vv" values expected
+        //by some of the CAPTCHA-checking code in SMF to trigger the verification routines.
+        echo '<div class="g-recaptcha" data-sitekey="', $modSettings['recaptcha_public_key'], '" data-theme="', $modSettings['recaptcha_theme'] ,'"></div>
+          <input type="hidden" name="', $verify_id, '_vv[recaptcha]" value="true">';
+    }
 		// Do the actual stuff - image first?
 		elseif ($i == 0 && $verify_context['show_visual'])
 		{
@@ -340,7 +340,7 @@ function template_control_verification($verify_id, $display_type = 'all', $reset
 		else
 		{
 			// Where in the question array is this question?
-			$qIndex = $verify_context['show_visual'] ? $i - 1 : $i;
+			$qIndex = ($verify_context['show_visual'] || $verify_context['use_recaptcha']) ? $i - 1 : $i;
 
 			echo '
 				<div class="smalltext">
