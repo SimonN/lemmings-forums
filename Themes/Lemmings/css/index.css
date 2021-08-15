@@ -4,7 +4,7 @@
 /* Normal, standard links. */
 a:link, a:visited
 {
-	color: #346;
+	color: #44E;
 	text-decoration: none;
 }
 a:hover
@@ -16,7 +16,7 @@ a:hover
 /* Links that open in a new window. */
 a.new_win:link, a.new_win:visited
 {
-	color: #346;
+	color: #44E;
 	text-decoration: none;
 }
 a.new_win:hover
@@ -33,7 +33,7 @@ table
 /* Set a fontsize that will look the same in all browsers. */
 body
 {
-	background: #E9EEF2 url(../images/theme/backdrop.png) repeat-x;
+	background: #311000 url(../images/theme/backdrop.png) repeat;
 	font: 78%/130% "Verdana", "Arial", "Helvetica", sans-serif;
 	margin: 0 auto;
 	padding: 15px 0;
@@ -48,7 +48,7 @@ body#help_popup
 /* use dark grey for the text, leaving #000 for headers etc */
 body, td, th, tr
 {
-	color: #444;
+	color: #222;
 }
 
 /* This division wraps the entire forum when a forum width is set. */
@@ -80,8 +80,8 @@ input, button, select, textarea
 	font: 95%/115% verdana, Helvetica, sans-serif;
 	color: #000;
 	background: #fff;
-	border: 1px solid #7f9db9;
-	padding: 2px;
+	border: 2px solid #000;
+	padding: 3px;
 }
 
 /* Select elements look horrible with the extra padding, so leave them unpadded. */
@@ -105,23 +105,28 @@ textarea
 /* Buttons should be styled a bit differently, in order to make them look more button'ish. */
 .button_submit, .button_reset
 {
-	background: #cde7ff url(../images/theme/submit_bg.png) no-repeat;
-	border: 1px solid #aaa;
+	background: #fff url(../images/theme/submit_bg.png) no-repeat;
+	border: 2px solid #000;
 	cursor: pointer;
-	font-weight: normal;
+	font-weight: bold;
+	padding: 4px 3px 3px 3px;
 }
-input:hover, textarea:hover, button:hover, select:hover
+input:hover, textarea:hover, select:hover
 {
-	border: 1px solid #454545;
+	border: 2px solid #222;
+}
+button:hover
+{
+	border: 2px solid #FFF;
 }
 .button_submit:hover, .button_reset:hover
 {
-	border: 1px solid #aaa;
-	background: url(../images/theme/submit_bg.png) no-repeat 0 -140px #cde7ff;
+	border: 2px solid #FFF;
+	background: url(../images/theme/submit_bg.png) no-repeat 0 -138px #cde7ff;
 }
 input:focus, textarea:focus, button:focus, select:focus
 {
-	border: 1px solid #454545;
+	border: 2px solid #444;
 }
 
 /* All input elements that are checkboxes or radio buttons shouldn't have a border around them. */
@@ -144,10 +149,10 @@ input[disabled].input_text
 /* Standard horizontal rule.. ([hr], etc.) */
 hr, .hrcolor
 {
-	height: 1px;
+	height: 2px;
 	border: 0;
 	color: #ccc;
-	background-color: #ccc;
+	background-color: #44E;
 }
 
 /* By default set the color on these tags as #000. */
@@ -426,7 +431,7 @@ code.bbc_code
 
 .titlebg, .titlebg2, tr.titlebg th, tr.titlebg td, tr.titlebg2 td
 {
-	color: #222;
+	color: #888;
 	font-family: arial, helvetica, sans-serif;
 	font-size: 1.1em;
 	font-weight: bold;
@@ -464,12 +469,12 @@ tr.catbg th a:link, tr.catbg th a:visited, tr.catbg2 td a:link, tr.catbg2 td a:v
 .windowbg, #preview_body
 {
 	color: #000;
-	background-color: #e7eaef;
+	background-color: #BAC9BB;
 }
 .windowbg2
 {
 	color: #000;
-	background-color: #f0f4f7;
+	background-color: #CDE0D2;
 }
 .windowbg3
 {
@@ -522,22 +527,22 @@ div.pagesection div.floatright input
 /* Sticky topics get a different background */
 .stickybg
 {
-	background: #e8d8cf;
+	background: #BABBC9;
 }
 .stickybg2
 {
-	background: #f2e3d9;
+	background: #CDD2E0;
 }
 
 /* Locked posts get a different shade, too! */
 .lockedbg
 {
-	background: #d4dce2;
+	background: #AAB5AA;
 	font-style: italic;
 }
 .lockedbg2
 {
-	background: #d8e1e7;
+	background: #AAB5AA;
 	font-style: italic;
 }
 
@@ -804,7 +809,7 @@ h4.titlebg img.icon
 }
 div.cat_bar
 {
-	background: #99abbf url(../images/theme/main_block.png) no-repeat 0 -160px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -160px;
 	padding-left: 9px;
 	height: 31px;
 	overflow: hidden;
@@ -823,12 +828,12 @@ div.title_bar
 
 div.roundframe div.cat_bar
 {
-	background: #99abbf url(../images/theme/main_block.png) no-repeat 0 -240px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -240px;
 	margin-bottom: 0;
 }
 div.roundframe div.cat_bar h3.catbg
 {
-	background: url(../images/theme/main_block.png) no-repeat 100% -240px;
+	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 100% -240px;
 }
 div.title_barIC
 {
@@ -840,7 +845,7 @@ div.title_barIC
 }
 div.title_barIC h4.titlebg
 {
-	background: url(../images/theme/main_block.png) no-repeat 100% -120px;
+	background: #c2dec5 url(../images/theme/main_block.png) no-repeat 100% -120px;
 }
 #upshrinkHeaderIC p.pminfo
 {
@@ -1022,7 +1027,7 @@ table.table_grid thead tr.catbg th
 .roundframe
 {
 	padding: 0 10px;
-	background: #f5f5f5;
+	background: #DDD;
 	border-left: 1px solid #c5c5c5;
 	border-right: 1px solid #c5c5c5;
 }
@@ -1333,7 +1338,7 @@ ul#navigation li
 /* the framing graphics */
 #header
 {
-	background: url(../images/theme/main_block.png) #fefefe no-repeat 0 -480px;
+	background: #E6E6E6 url(../images/theme/main_block.png) no-repeat 0 -480px;
 	padding-left: 20px;
 }
 #header div.frame
@@ -1345,7 +1350,7 @@ ul#navigation li
 /* the content section */
 #content_section
 {
-	background: #FFFFFF url(../images/theme/frame_repeat.png) repeat-y top left;
+	background: #E6E6E6 url(../images/theme/frame_repeat.png) repeat-y top left;
 	padding-left: 20px;
 }
 #content_section div.frame
@@ -1520,6 +1525,7 @@ div#upper_section div.news form
 {
 	display: inline;
 	padding-right: 5px;
+	font-weight: bold;
 }
 #footer_section ul li.copyright
 {
@@ -1580,11 +1586,11 @@ table.table_list tbody.content td.icon
 {
 	font-weight: bold;
 	font-size: 110%;
-	color: #d97b33;
+	color: #BB0;
 }
 .table_list tbody.content td.children
 {
-	color: #555;
+	color: #224;
 	font-size: 85%;
 }
 p.moderators
