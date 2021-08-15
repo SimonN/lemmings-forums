@@ -342,7 +342,7 @@ code.bbc_code
 /* The "Quote:" and "Code:" header parts... */
 .codeheader, .quoteheader
 {
-	color: #666;
+	color: #CCC;
 	font-size: x-small;
 	font-weight: bold;
 	padding: 0 0.3em;
@@ -470,12 +470,12 @@ tr.catbg th a:link, tr.catbg th a:visited, tr.catbg2 td a:link, tr.catbg2 td a:v
 .windowbg, #preview_body
 {
 	color: #fff;
-	background-color: #465049;
+	background-color: #364537;
 }
 .windowbg2
 {
 	color: #fff;
-	background-color: #3D443D;
+	background-color: #1f3224;
 }
 .windowbg3
 {
@@ -3656,7 +3656,7 @@ div.spoilerheader input
 
 div.spoilerbody 
 {
-	color: #0f0f0f;
+	color: #f0f0f0;
 	border: 1px dotted gray;
 	padding: 1em;
 	margin: 1em;
