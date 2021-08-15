@@ -315,11 +315,11 @@ blockquote.bbc_standard_quote, blockquote.bbc_alternate_quote
 /* Alterate blockquote stylings */
 blockquote.bbc_standard_quote
 {
-	background-color: #dee7ef;
+	background-color: #8e877f;
 }
 blockquote.bbc_alternate_quote
 {
-	background-color: #dee7ef;
+	background-color: #8e877f;
 }
 
 /* A code block - maybe PHP ;). */
@@ -444,7 +444,7 @@ code.bbc_code
 	font-family: arial, helvetica, sans-serif;
 	font-size: 1.1em;
 	font-weight: bold;
-	background: #a7b9cd url(../images/theme/main_block.png) no-repeat -10px -280px;
+	background: #3C984A url(../images/theme/main_block.png) no-repeat -10px -280px;
 }
 
 /* adjust the table versions of headers */
@@ -810,7 +810,7 @@ h4.titlebg img.icon
 }
 div.cat_bar
 {
-	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -160px;
+	background: #3A9749 url(../images/theme/main_block.png) no-repeat 0 -160px;
 	padding-left: 9px;
 	height: 31px;
 	overflow: hidden;
@@ -829,12 +829,12 @@ div.title_bar
 
 div.roundframe div.cat_bar
 {
-	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 0 -240px;
+	background: #3A9749 url(../images/theme/main_block.png) no-repeat 0 -240px;
 	margin-bottom: 0;
 }
 div.roundframe div.cat_bar h3.catbg
 {
-	background: #6fcb7d url(../images/theme/main_block.png) no-repeat 100% -240px;
+	background: #3A9749 url(../images/theme/main_block.png) no-repeat 100% -240px;
 }
 div.title_barIC
 {
@@ -846,7 +846,7 @@ div.title_barIC
 }
 div.title_barIC h4.titlebg
 {
-	background: #c2dec5 url(../images/theme/main_block.png) no-repeat 100% -120px;
+	background: #244129 url(../images/theme/main_block.png) no-repeat 100% -120px;
 }
 #upshrinkHeaderIC p.pminfo
 {
@@ -882,11 +882,11 @@ table.table_list a.collapse
 }
 tr.catbg th.first_th
 {
-	background: #a7b9cd url(../images/theme/main_block.png) no-repeat 0 -280px;
+	background: #3C984A url(../images/theme/main_block.png) no-repeat 0 -280px;
 }
 tr.catbg th.last_th
 {
-	background: #a7b9cd url(../images/theme/main_block.png) no-repeat 100% -280px;
+	background: #3C984A url(../images/theme/main_block.png) no-repeat 100% -280px;
 }
 tr.titlebg th.first_th
 {
@@ -1339,7 +1339,7 @@ ul#navigation li
 /* the framing graphics */
 #header
 {
-	background: #E6E6E6 url(../images/theme/main_block.png) no-repeat 0 -480px;
+	background: #193D1B url(../images/theme/main_block.png) no-repeat 0 -480px;
 	padding-left: 20px;
 }
 #header div.frame
@@ -1351,7 +1351,7 @@ ul#navigation li
 /* the content section */
 #content_section
 {
-	background: #E6E6E6 url(../images/theme/frame_repeat.png) repeat-y top left;
+	background: #193D1B url(../images/theme/frame_repeat.png) repeat-y top left;
 	padding-left: 20px;
 }
 #content_section div.frame
@@ -1591,7 +1591,7 @@ table.table_list tbody.content td.icon
 }
 .table_list tbody.content td.children
 {
-	color: #224;
+	color: #BBE;
 	font-size: 85%;
 }
 p.moderators
