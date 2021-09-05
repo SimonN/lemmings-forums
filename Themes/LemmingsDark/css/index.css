@@ -78,8 +78,8 @@ form
 input, button, select, textarea
 {
 	font: 95%/115% verdana, Helvetica, sans-serif;
-	color: #000;
-	background: #ddd;
+	color: #ddd;
+	background: #111;
 	border: 2px solid #fff;
 	padding: 3px;
 }
@@ -106,7 +106,7 @@ textarea
 .button_submit, .button_reset
 {
 	background: #444 url(../images/theme/submit_bg.png) no-repeat;
-  color: #fff;
+  color: #f0f0f0;
 	border: 2px solid #fff;
 	cursor: pointer;
 	font-weight: bold;
@@ -159,7 +159,7 @@ hr, .hrcolor
 /* By default set the color on these tags as #fff. */
 h1, h2, h3, h4, h5, h6
 {
-	color: #fff;
+	color: #f0f0f0;
 	font-size: 1em;
 	margin: 0;
 	padding: 0;
@@ -302,7 +302,7 @@ ul.reset, ul.reset li
 blockquote.bbc_standard_quote, blockquote.bbc_alternate_quote
 {
 	font-size: x-small;
-	color: #fff;
+	color: #f0f0f0;
 	line-height: 1.4em;
 	background: url(../images/theme/quote.png) 0.1em 0.1em no-repeat;
 	border-top: 2px solid #99A;
@@ -315,11 +315,11 @@ blockquote.bbc_standard_quote, blockquote.bbc_alternate_quote
 /* Alterate blockquote stylings */
 blockquote.bbc_standard_quote
 {
-	background-color: #8e877f;
+	background-color: #5e574f;
 }
 blockquote.bbc_alternate_quote
 {
-	background-color: #8e877f;
+	background-color: #5e574f;
 }
 
 /* A code block - maybe PHP ;). */
@@ -469,17 +469,17 @@ tr.catbg th a:link, tr.catbg th a:visited, tr.catbg2 td a:link, tr.catbg2 td a:v
 /* Alternating backgrounds for posts, and several other sections of the forum. */
 .windowbg, #preview_body
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #364537;
 }
 .windowbg2
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #1f3224;
 }
 .windowbg3
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #454649;
 }
 
@@ -504,24 +504,24 @@ div.pagesection div.floatright input
 /* Colors for background of posts requiring approval */
 .approvebg
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #ffeaea;
 }
 .approvebg2
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #0002f2;
 }
 
 /* Color for background of *topics* requiring approval */
 .approvetbg
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #e4a17c;
 }
 .approvetbg2
 {
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #f3bd9f;
 }
 
@@ -580,12 +580,14 @@ div.pagesection div.floatright input
 .error
 {
 	color: red;
+  font-weight: bold;
 }
 
 /* Messages that somehow need to attract the attention. */
 .alert
 {
 	color: red;
+  font-weight: bold;
 }
 
 /* Calendar colors for birthdays, events and holidays */
@@ -654,7 +656,7 @@ a.moderation_link, a.moderation_link:visited
 	font-size: 0.9em;
 	line-height: 1.3em;
 	border: 1px solid #bbb;
-	background: #f0f6f0;
+	background: #333333;
 	margin: 0.2em 1px 1em 1px;
 }
 .information p
@@ -1125,7 +1127,7 @@ span.lowerframe span
 .dropmenu a
 {
 	display: block;
-	color: #fff;
+	color: #f0f0f0;
 	text-decoration: none;
 }
 .dropmenu a span
@@ -1211,7 +1213,7 @@ span.lowerframe span
 .dropmenu li li a:hover, .dropmenu li li:hover>a
 {
 	background: #d4dbe4;
-	color: #fff;
+	color: #f0f0f0;
 	text-decoration: none;
 }
 .dropmenu li:hover ul ul, .dropmenu li:hover ul ul ul
@@ -1264,7 +1266,7 @@ span.lowerframe span
 {
 	display: block;
 	font-size: 0.8em;
-	color: #fff;
+	color: #f0f0f0;
 	background: #e8e8e8 url(../images/theme/menu_gfx.png) no-repeat 0 -60px;
 	padding: 0 0 0 8px;
 	margin-left: 12px;
@@ -1741,7 +1743,7 @@ div.table_frame .table_list
 }
 .table_frame .table_list td.icon, .table_frame .table_list td.info, .table_frame .table_list td.stats
 {
-	border-right: 2px solid black;
+	border-right: 2px solid white;
 }
 #messageindex
 {
@@ -2599,7 +2601,7 @@ dl.register_form dd
 	padding: 4px;
 	width: 32ex;
 	background-color: #000;
-	color: #fff;
+	color: #f0f0f0;
 	margin-left: 5ex;
 	border: 1px solid #fff;
 }
@@ -2786,7 +2788,7 @@ tr.windowbg td, tr.windowbg2 td, tr.approvebg td, tr.highlight2 td
 {
 	padding: 1em;
 	border: 1px solid #cc3344;
-	color: #fff;
+	color: #f0f0f0;
 	background-color: #4f1419;
 	margin-bottom: 1em;
 }
