@@ -879,7 +879,7 @@ function AddMailQueue($flush = false, $to_array = array(), $subject = '', $messa
  * @param int $pm_head The ID of the chain being replied to - if any.
  * @return array An array with log entries telling how many recipients were successful and which recipients it failed to send to.
  */
-function sendpm($recipients, $subject, $message, $store_outbox = false, $from = null, $pm_head = 0)
+function sendpm($recipients, $subject, $message, $store_outbox = false, $from = null, $pm_head = 0, $attachments = array(), $report = false)
 {
 	global $scripturl, $txt, $user_info, $language, $sourcedir;
 	global $modSettings, $smcFunc;
@@ -911,6 +911,51 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 	if (!is_array($recipients))
 		$recipients = array($recipients);
 
+	//
+	// PM Attachments MOD BEGIN
+	//
+	
+	$str_downloads = '';
+	$str_attachments = '';
+
+	if(!is_array($attachments))
+		$attachments = array();
+
+	if (count($attachments) >= 1)
+	{
+		$parent_attachments = array();
+		
+		$request = $smcFunc['db_query']('', '
+			SELECT
+				id_attach
+			FROM {db_prefix}pm_attachments
+			WHERE id_attach IN ({array_int:attach_ids})
+				AND attachment_type = {int:not_thumb}',
+			array(
+				'attach_ids' => $attachments,
+				'not_thumb' => 0,
+			)
+		);
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+		{
+			$parent_attachments[] = $row['id_attach'];
+		}
+		
+		$smcFunc['db_free_result']($request);
+	
+		// obtain string of all attach_ids...
+		$str_attachments = implode(',', $parent_attachments);
+		$xStr = 0;
+		// fill downloads string with 0 for each attachment in pm...
+		foreach ($parent_attachments as $attach) {
+			$xStr++;
+			$str_downloads .= $xStr < count($parent_attachments) ? '0,' : '0';
+		}
+	}
+	//
+	// PM Attachments MOD END
+	//
+		
 	// Integrated PMs
 	call_integration_hook('integrate_personal_message', array(&$recipients, &$from, &$subject, &$message));
 
@@ -1148,6 +1193,38 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 	// Add the recipients.
 	if (!empty($id_pm))
 	{
+		//
+		// PM ATTACHMENTS MOD BEGIN
+		//
+		
+		// Fix the attachments.
+		if (!empty($attachments))
+			// is it being reported?
+			if ($report)
+				$smcFunc['db_query']('', '
+					UPDATE {db_prefix}pm_attachments
+					SET pm_report = {int:id_pm}
+					WHERE id_attach IN ({array_int:attachment_list})',
+					array(
+						'attachment_list' => $attachments,
+						'id_pm' => $id_pm,
+					)
+				);
+			else
+				$smcFunc['db_query']('', '
+					UPDATE {db_prefix}pm_attachments
+					SET id_pm = {int:id_pm}
+					WHERE id_attach IN ({array_int:attachment_list})',
+					array(
+						'attachment_list' => $attachments,
+						'id_pm' => $id_pm,
+					)
+				);
+
+		//
+		// PM ATTACHMENTS MOD END
+		//
+		
 		// If this is new we need to set it part of it's own conversation.
 		if (empty($pm_head))
 			$smcFunc['db_query']('', '
@@ -1172,7 +1249,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		$to_list = array();
 		foreach ($all_to as $to)
 		{
-			$insertRows[] = array($id_pm, $to, in_array($to, $recipients['bcc']) ? 1 : 0, isset($deletes[$to]) ? 1 : 0, 1);
+			$insertRows[] = array($id_pm, $to, in_array($to, $recipients['bcc']) ? 1 : 0, isset($deletes[$to]) ? 1 : 0, 1, $str_attachments, $str_downloads);
 			if (!in_array($to, $recipients['bcc']))
 				$to_list[] = $to;
 		}
@@ -1180,7 +1257,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		$smcFunc['db_insert']('insert',
 			'{db_prefix}pm_recipients',
 			array(
-				'id_pm' => 'int', 'id_member' => 'int', 'bcc' => 'int', 'deleted' => 'int', 'is_new' => 'int'
+				'id_pm' => 'int', 'id_member' => 'int', 'bcc' => 'int', 'deleted' => 'int', 'is_new' => 'int', 'attachments' => 'string-255', 'downloads' => 'string-255'
 			),
 			$insertRows,
 			array('id_pm', 'id_member')
@@ -1249,6 +1326,26 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		$emaildata = loadEmailTemplate($email_template, $replacements, $lang);
 
 		// Off the notification email goes!
+		//
+		// PM ATTACHMENTS MOD Begin...
+		//
+		
+		$email_template .= "\n";
+		if (!empty($parent_attachments))
+		{
+			$email_template .= "\n" . $txt['pmattachments_mail'] . "\n";
+			
+			foreach ($parent_attachments as $attachID)
+				$email_template .= $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachID . "\n";		
+		}
+
+		$email_template .= "\n" . $txt['instant_reply'] . ' ' . $scripturl . '?action=pm;sa=send;f=inbox;pmsg=' . $id_pm . ';quote;u=' . $from['id'];
+		
+		//
+		// PM ATTACHMENTS MOD END!
+		//
+
+		
 		sendmail($notification_list, $emaildata['subject'], $emaildata['body'], null, 'p' . $id_pm, $emaildata['is_html'], 2, null, true);
 	}
 
@@ -2957,7 +3054,10 @@ function loadEmailTemplate($template, $replacements = array(), $lang = '', $load
 
 	// First things first, load up the email templates language file, if we need to.
 	if ($loadLang)
+	{
 		loadLanguage('EmailTemplates', $lang);
+		loadLanguage('PMAttachments', $lang);
+	}
 
 	if (!isset($txt[$template . '_subject']) || !isset($txt[$template . '_body']))
 		fatal_lang_error('email_no_template', 'template', array($template));

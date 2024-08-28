@@ -1695,7 +1695,7 @@ function RepairAttachments()
  * @param array $to_fix IDs of attachments to fix
  * @param int $max_substep The maximum substep to reach before pausing
  */
-function pauseAttachmentMaintenance($to_fix, $max_substep = 0)
+function pauseAttachmentMaintenance($to_fix, $max_substep = 0, $pm = false)
 {
 	global $context, $txt;
 
@@ -1708,7 +1708,7 @@ function pauseAttachmentMaintenance($to_fix, $max_substep = 0)
 	if ((time() - TIME_START) < 3 || $context['starting_substep'] == $_GET['substep'])
 		return;
 
-	$context['continue_get_data'] = '?action=admin;area=manageattachments;sa=repair' . (isset($_GET['fixErrors']) ? ';fixErrors' : '') . ';step=' . $_GET['step'] . ';substep=' . $_GET['substep'] . ';' . $context['session_var'] . '=' . $context['session_id'];
+	$context['continue_get_data'] = '?action=admin;area=manageattachments;sa=' . ($pm ? 'pmrepair' : 'repair') . (isset($_GET['fixErrors']) ? ';fixErrors' : '') . ';step=' . $_GET['step'] . ';substep=' . $_GET['substep'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 	$context['page_title'] = $txt['not_done_title'];
 	$context['continue_post_data'] = '';
 	$context['continue_countdown'] = '2';

@@ -504,7 +504,36 @@ function template_single_pm($message)
 						', $message['body'], '
 					</div>
 				</div><!-- .post -->
-				<div class="under_message">';
+				<div class="under_message">';// Assuming there are attachments...
+			if (allowedTo('pm_view_attachments') && !empty($message['attachment'])) 
+			{
+				echo '
+					<div id="post_', $message['id'], '_footer" class="attachments">';
+			
+				echo '
+						<hr width="98%" size="1" class="hrcolor" />
+						<div style="overflow: ', $context['browser']['is_firefox'] ? 'visible' : 'auto', '; width: 98%;">';
+
+				foreach ($message['attachment'] as $attachment)
+				{
+					if ($attachment['is_image'])
+					{
+						if ($attachment['thumbnail']['has_thumb'])
+							echo '
+								<a href="', $attachment['href'], ';image" id="link_', $attachment['id'] . (function_exists('highslide_images') ? '" class="highslide" rel="highslide"' : '" onclick="' . $attachment['thumbnail']['javascript']) . '"><img src="', $attachment['thumbnail']['href'], '" alt="' , $attachment['name'] , '" id="thumb_', $attachment['id'], '" border="0" /></a><br />' . ($attachment['is_image'] && function_exists('highslide_images') ? '<div class="highslide-heading">' . $message['subject'] . '</div>' : '');
+						else
+							echo '
+								<img src="' . $attachment['href'] . ';image" alt="" width="' . $attachment['width'] . '" height="' . $attachment['height'] . '" border="0" /><br />';
+					}
+					echo '
+								<a href="' . $attachment['href'] . '"><img src="' . $settings['images_url'] . '/icons/clip.gif" align="middle" alt="*" border="0" />&nbsp;' . $attachment['name'] . '</a>
+								<div style="padding-left:1.0em; margin-top:-0.5em;">(', $attachment['size'] . ($attachment['is_image'] ? ', ' . $attachment['real_width'] . 'x' . $attachment['real_height'] : '') . ')</div>';
+				}
+				echo '
+						</div></div>';
+			}
+
+			
 
 	// Add an extra line at the bottom if we have labels enabled.
 	if ($context['folder'] != 'sent' && !empty($context['currently_using_labels']) && $context['display_mode'] != 2)
@@ -1007,7 +1036,7 @@ function template_send()
 
 	// Main message editing box.
 	echo '
-		<form action="', $scripturl, '?action=pm;sa=send2" method="post" accept-charset="', $context['character_set'], '" name="postmodify" id="postmodify" class="flow_hidden" onsubmit="submitonce(this);">
+		<form action="', $scripturl, '?action=pm;sa=send2"', allowedTo('pm_post_attachments') ? ' enctype="multipart/form-data"' : '', ' method="post" accept-charset="', $context['character_set'], '" name="postmodify" id="postmodify" class="flow_hidden" onsubmit="submitonce(this);">
 			<div class="cat_bar">
 				<h3 class="catbg">
 					<span class="main_icons inbox icon" title="', $txt['new_message'], '"></span> ', $txt['new_message'], '
@@ -1115,7 +1144,79 @@ function template_send()
 					', template_control_verification($context['visual_verification_id'], 'all'), '
 				</div>';
 
-	// Send, Preview, spellcheck buttons.
+		// If this post already has attachments on it - give information about them.
+	if (!empty($context['current_attachments']))
+	{
+		echo '
+				<dl id="postAttachment">
+					<dt>
+						', $txt['attached'], ':
+					</dt>
+					<dd class="smalltext">
+						<input type="hidden" name="attach_del[]" value="0" />
+						', $txt['uncheck_unwatchd_attach'], ':
+					</dd>';
+			foreach ($context['current_attachments'] as $attachment)
+				echo '
+					<dd class="smalltext">
+						<label for="attachment_', $attachment['id'], '"><input type="checkbox" id= "attachment_', $attachment['id'], '" name="attach_del[]" value="', $attachment['id'], '"', empty($attachment['unchecked']) ? ' checked="checked"' : '', ' class="input_check" /> ', $attachment['name'], '</label>
+					</dd>';
+		echo '
+				</dl>';
+	}
+
+	// Is the user allowed to pm any additional ones? If so give them the boxes to do it!
+	if (!empty($context['can_post_attachment']))
+	{
+		echo '								
+							<dl id="postAttachment2">
+								<dt>
+									', $txt['attach'], ':
+								</dt>	
+								<dd class="smalltext">
+									<input type="file" size="60" name="attachment[]" id="attachment1" class="input_file" /> (<a href="javascript:void(0);" onclick="cleanFileInput(\'attachment1\');">', $txt['clean_attach'], '</a>)';
+
+		// Show more boxes only if they aren't approaching their limit.
+		if ($context['num_allowed_attachments'] > 1)
+			echo '
+									<script language="JavaScript" type="text/javascript"><!-- // --><![', 'CDATA', '[
+										var allowed_attachments = ', $context['num_allowed_attachments'], ' - 1;
+										var current_attachment = 1;
+
+										function addAttachment()
+										{
+											if (allowed_attachments <= 0)
+												return alert("', $txt['more_attachments_error'], '");
+
+											allowed_attachments = allowed_attachments - 1;
+											current_attachment = current_attachment + 1;
+
+											setOuterHTML(document.getElementById("moreAttachments"), \'<dd class="smalltext"><input type="file" size="38" name="attachment[]" id="attachment\' + current_attachment + \'" class="input_file" /> (<a href="javascript:void(0);" onclick="cleanFileInput(\\\'attachment\' + current_attachment + \'\\\');">', $txt['clean_attach'], '</a>)<\' + \'/dd>\' + (allowed_attachments > 0 ? \'<dd class="smalltext" id="moreAttachments"><a href="javascript:void(0);" onclick="addAttachment(); return false;">(', $txt['more_attachments'], ')<\' + \'/a><\' + \'/dd>\' : \'\'));
+
+											return true;
+										}
+									// ', ']', ']></script>
+									</dd>
+									<dd class="smalltext" id="moreAttachments"><a href="javascript:void(0);" onclick="addAttachment(); return false;">(', $txt['more_attachments'], ')</a></dd>';
+
+			echo '
+						<dd class="smalltext">';
+
+		// Show some useful information such as allowed extensions, maximum size and amount of attachments allowed.
+		if (!empty($modSettings['pmAttachmentCheckExtensions']))
+			echo '
+									', $txt['allowed_types'], ': ', $context['allowed_extensions'], '<br />';
+
+		if (!empty($context['attachment_restrictions']))
+			echo '
+									', $txt['attach_restrictions'], ' ', implode(', ', $context['attachment_restrictions']), '<br />';
+
+		echo '
+						</dd>
+					</dl>';
+	}
+
+// Send, Preview, spellcheck buttons.
 	echo '
 				<span id="post_confirm_buttons">
 					', template_control_richedit_buttons($context['post_box_name']), '

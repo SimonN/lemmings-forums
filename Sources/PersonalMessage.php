@@ -35,8 +35,11 @@ function MessageMain()
 
 	// This file contains the basic functions for sending a PM.
 	require_once($sourcedir . '/Subs-Post.php');
+	require_once($sourcedir . '/Subs-PMAttachments.php');
+	Add_PM_JavaScript();
 
 	loadLanguage('PersonalMessage+Drafts');
+	loadLanguage('PMAttachments');
 
 	if (!isset($_REQUEST['xml']))
 		loadTemplate('PersonalMessage');
@@ -461,6 +464,13 @@ function MessagePopup()
  */
 function MessageFolder()
 {
+	//
+	// PM ATTACHMENTS MOD MessageFolder global...
+	//
+	global $attachments;
+	//
+	// PM ATTACHMENTS MOD END!!
+	//
 	global $txt, $scripturl, $modSettings, $context, $subjects_request;
 	global $messages_request, $user_info, $recipients, $options, $smcFunc, $user_settings;
 
@@ -825,6 +835,60 @@ function MessageFolder()
 		$all_pms = array_merge($pms, $display_pms);
 		$all_pms = array_unique($all_pms);
 
+		//
+		// PM ATTACHMENTS BEGIN...
+		//
+
+		$attachments = array();
+
+		if (!empty($all_pms))
+		{
+			// Fetch attachments.
+			if (!empty($modSettings['pmAttachmentEnable']) && allowedTo('pm_view_attachments'))
+			{
+				$request = $smcFunc['db_query']('', '
+					SELECT
+						pa.id_attach, pa.id_folder, pa.id_pm, pa.pm_report, pa.filename, pa.file_hash, COALESCE(pa.size, 0) AS filesize, pa.downloads,
+						pa.width, pa.height' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : ',
+						COALESCE(thumb.id_attach, 0) AS id_thumb, thumb.width AS thumb_width, thumb.height AS thumb_height') . '
+					FROM {db_prefix}pm_attachments AS pa' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : '
+						LEFT JOIN {db_prefix}pm_attachments AS thumb ON (thumb.id_attach = pa.id_thumb)') . '
+					WHERE pa.attachment_type = {int:attachment_type} AND (pa.id_pm IN ({array_int:pm_list}) OR pa.pm_report IN ({array_int:pm_list}))',
+					array(
+						'pm_list' => $all_pms,
+						'attachment_type' => 0,
+					)
+				);
+				$temp = array();
+				while ($row = $smcFunc['db_fetch_assoc']($request))
+				{
+					$temp[$row['id_attach']] = $row;
+					
+					if (!empty($row['pm_report']))
+						if (!isset($attachments[$row['pm_report']]))
+							$attachments[$row['pm_report']] = array();
+
+					if (!isset($attachments[$row['id_pm']]))
+						$attachments[$row['id_pm']] = array();
+				}
+				$smcFunc['db_free_result']($request);
+
+				// This is better than sorting it with the query...
+				ksort($temp);
+
+				foreach ($temp as $row) {
+					if (!empty($row['pm_report']))
+						$attachments[$row['pm_report']][] = $row;
+					
+					$attachments[$row['id_pm']][] = $row;
+				}
+			}
+
+		}
+		//
+		// PM ATTACHMENTS END!!
+		//
+
 		// Get recipients (don't include bcc-recipients for your inbox, you're not supposed to know :P).
 		$request = $smcFunc['db_query']('', '
 			SELECT pmr.id_pm, mem_to.id_member AS id_member_to, mem_to.real_name AS to_name, pmr.bcc, pmr.in_inbox, pmr.is_read
@@ -980,6 +1044,14 @@ function prepareMessageContext($type = 'subject', $reset = false)
 {
 	global $txt, $scripturl, $modSettings, $context, $messages_request, $memberContext, $recipients, $smcFunc;
 	global $user_info, $subjects_request;
+	
+	//
+	// PM ATTACHMENTS MOD prepareMessageContext global...
+	//
+	global $attachments;
+	//
+	// PM ATTACHMENTS MOD END!
+	//
 
 	// Count the current message number....
 	static $counter = null;
@@ -1081,6 +1153,7 @@ function prepareMessageContext($type = 'subject', $reset = false)
 
 	// Send the array.
 	$output = array(
+		'attachment' => loadPMAttachmentContext($message['id_pm']),
 		'id' => $message['id_pm'],
 		'member' => &$memberContext[$message['id_member_from']],
 		'subject' => $message['subject'],
@@ -1836,6 +1909,27 @@ function MessagePost()
 
 	// Set the title...
 	$context['page_title'] = $txt['send_message'];
+	
+	// Clean up and Clear any attachments that may be in the session...
+	if (!empty($_SESSION['temp_pm_attachments']))
+	{
+		if (!empty($modSettings['pmCurrentAttachmentUploadDir']))
+		{
+			if (!is_array($modSettings['pmAttachmentUploadDir']))
+				$modSettings['pmAttachmentUploadDir'] = unserialize($modSettings['pmAttachmentUploadDir']);
+
+			// Just use the current path for temp files.
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'][$modSettings['pmCurrentAttachmentUploadDir']];
+		}
+		else
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'];
+		
+		foreach ($_SESSION['temp_pm_attachments'] as $attachID => $name)
+		{
+			unset($_SESSION['temp_pm_attachments'][$attachID]);
+			@unlink($current_attach_dir . '/' . $attachID);
+		}
+	}
 
 	$context['reply'] = isset($_REQUEST['pmsg']) || isset($_REQUEST['quote']);
 
@@ -2046,6 +2140,10 @@ function MessagePost()
 	else
 		$context['to_value'] = '';
 
+	// Handle the Attachment info...
+	$context['num_allowed_attachments'] = empty($modSettings['attachmentNumPerPMLimit']) ? 50 : $modSettings['attachmentNumPerPMLimit'];
+	$context['can_post_attachment'] = !empty($modSettings['pmAttachmentEnable']) && $modSettings['pmAttachmentEnable'] == 1 && allowedTo('pm_post_attachments') && $context['num_allowed_attachments'] > 0 ? 1 : 0;
+
 	// Set the defaults...
 	$context['subject'] = $form_subject;
 	$context['message'] = str_replace(array('"', '<', '>', '&nbsp;'), array('&quot;', '&lt;', '&gt;', ' '), $form_message);
@@ -2086,6 +2184,17 @@ function MessagePost()
 	$context['post_box_name'] = $editorOptions['id'];
 
 	$context['bcc_value'] = '';
+
+	// If the user can post attachments prepare the warning labels.
+	if (!empty($context['can_post_attachment']))
+	{
+		$context['allowed_extensions'] = strtr($modSettings['pmAttachmentExtensions'], array(',' => ', '));
+		$context['attachment_restrictions'] = array();
+		$attachmentRestrictionTypes = array('attachmentNumPerPMLimit', 'attachmentPMLimit', 'pmAttachmentSizeLimit');
+		foreach ($attachmentRestrictionTypes as $type)
+			if (!empty($modSettings[$type]))
+				$context['attachment_restrictions'][] = sprintf($txt['attach_restrict_' . $type], $modSettings[$type]);
+	}
 
 	$context['require_verification'] = !$user_info['is_admin'] && !empty($modSettings['pm_posts_verification']) && $user_info['posts'] < $modSettings['pm_posts_verification'];
 	if ($context['require_verification'])
@@ -2145,6 +2254,8 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 
 	$context['page_title'] = $txt['send_message'];
 
+	checkSession('request');
+
 	// Got some known members?
 	$context['recipients'] = array(
 		'to' => array(),
@@ -2173,10 +2284,154 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 		$smcFunc['db_free_result']($request);
 	}
 
+
+	// An array to hold all the attachments for this pm.
+	$context['current_attachments'] = array();
+	
+	if (allowedTo('pm_post_attachments'))
+	{
+		if (empty($_SESSION['temp_pm_attachments']))
+			$_SESSION['temp_pm_attachments'] = array();
+
+		if (!empty($modSettings['pmCurrentAttachmentUploadDir']))
+		{
+			if (!is_array($modSettings['pmAttachmentUploadDir']))
+				$modSettings['pmAttachmentUploadDir'] = unserialize($modSettings['pmAttachmentUploadDir']);
+
+			// Just use the current path for temp files.
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'][$modSettings['pmCurrentAttachmentUploadDir']];
+		}
+		else
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'];
+
+		$quantity = 0;
+		$total_size = 0;
+
+		$temp_start = 0;
+
+		if (!empty($_SESSION['temp_pm_attachments']))
+			foreach ($_SESSION['temp_pm_attachments'] as $attachID => $name)
+			{
+				$temp_start++;
+
+				if (preg_match('~^post_tmp_' . $user_info['id'] . '_\d+$~', $attachID) == 0)
+				{
+					unset($_SESSION['temp_pm_attachments'][$attachID]);
+					continue;
+				}
+
+				if (!empty($_POST['attach_del']) && !in_array($attachID, $_POST['attach_del']))
+				{
+					$deleted_attachments = true;
+					unset($_SESSION['temp_pm_attachments'][$attachID]);
+					@unlink($current_attach_dir . '/' . $attachID);
+					continue;
+				}
+
+				$quantity++;
+				$total_size += filesize($current_attach_dir . '/' . $attachID);
+
+				$context['current_attachments'][] = array(
+					'name' => $name,
+					'id' => $attachID,
+				);
+			}
+
+		if (!empty($_POST['attach_del']))
+		{
+			$del_temp = array();
+			foreach ($_POST['attach_del'] as $i => $dummy)
+				$del_temp[$i] = (int) $dummy;
+
+			if (!empty($context['current_attachments']))
+			{
+				foreach ($context['current_attachments'] as $k => $dummy)
+					if (!in_array($dummy['id'], $del_temp))
+					{
+						$context['current_attachments'][$k]['unchecked'] = true;
+						$deleted_attachments = !isset($deleted_attachments) || is_bool($deleted_attachments) ? 1 : $deleted_attachments + 1;
+						$quantity--;
+					}
+			}
+		}
+
+		if (!empty($_FILES['attachment']))
+			foreach ($_FILES['attachment']['tmp_name'] as $n => $dummy)
+			{
+				if ($_FILES['attachment']['name'][$n] == '')
+					continue;
+
+				if (!is_uploaded_file($_FILES['attachment']['tmp_name'][$n]) || (@ini_get('open_basedir') == '' && !file_exists($_FILES['attachment']['tmp_name'][$n])))
+					fatal_lang_error('attach_timeout', 'critical');
+
+				if (!empty($modSettings['pmAttachmentSizeLimit']) && $_FILES['attachment']['size'][$n] > $modSettings['pmAttachmentSizeLimit'] * 1024)
+					fatal_lang_error('file_too_big', false, array($modSettings['pmAttachmentSizeLimit']));
+
+				$quantity++;
+				if (!empty($modSettings['attachmentNumPerPMLimit']) && $quantity > $modSettings['attachmentNumPerPMLimit'])
+					fatal_lang_error('attachments_limit_per_post', false, array($modSettings['attachmentNumPerPMLimit']));
+
+				$total_size += $_FILES['attachment']['size'][$n];
+				if (!empty($modSettings['attachmentPMLimit']) && $total_size > $modSettings['attachmentPMLimit'] * 1024)
+					fatal_lang_error('file_too_big', false, array($modSettings['attachmentPMLimit']));
+
+				if (!empty($modSettings['pmAttachmentCheckExtensions']))
+				{
+					if (!in_array(strtolower(substr(strrchr($_FILES['attachment']['name'][$n], '.'), 1)), explode(',', strtolower($modSettings['pmAttachmentExtensions']))))
+						fatal_error($_FILES['attachment']['name'][$n] . '.<br />' . $txt['pm_cant_upload_type'] . ' ' . $modSettings['pmAttachmentExtensions'] . '.', false);
+				}
+
+				if (!empty($modSettings['pmAttachmentDirSizeLimit']))
+				{
+					// Make sure the directory isn't full.
+					$dirSize = 0;
+					$dir = @opendir($current_attach_dir) or fatal_lang_error('cant_access_upload_path', 'critical');
+					while ($file = readdir($dir))
+					{
+						if ($file == '.' || $file == '..')
+							continue;
+
+						if (preg_match('~^post_tmp_\d+_\d+$~', $file) != 0)
+						{
+							// Temp file is more than 5 hours old!
+							if (filemtime($current_attach_dir . '/' . $file) < time() - 18000)
+								@unlink($current_attach_dir . '/' . $file);
+							continue;
+						}
+
+						$dirSize += filesize($current_attach_dir . '/' . $file);
+					}
+					closedir($dir);
+
+					// Too big!  Maybe you could zip it or something...
+					if ($_FILES['attachment']['size'][$n] + $dirSize > $modSettings['pmAttachmentDirSizeLimit'] * 1024)
+						fatal_lang_error('ran_out_of_space');
+				}
+
+				if (!is_writable($current_attach_dir))
+					fatal_lang_error('attachments_no_write', 'critical');
+
+				$attachID = 'post_tmp_' . $user_info['id'] . '_' . $temp_start++;
+				$_SESSION['temp_pm_attachments'][$attachID] = basename($_FILES['attachment']['name'][$n]);
+				$context['current_attachments'][] = array(
+					'name' => basename($_FILES['attachment']['name'][$n]),
+					'id' => $attachID,
+				);
+
+				$destName = $current_attach_dir . '/' . $attachID;
+
+				if (!move_uploaded_file($_FILES['attachment']['tmp_name'][$n], $destName))
+					fatal_lang_error('attach_timeout', 'critical');
+				@chmod($destName, 0644);
+			}
+	}
+
 	// Set everything up like before....
 	$context['subject'] = isset($_REQUEST['subject']) ? $smcFunc['htmlspecialchars']($_REQUEST['subject']) : '';
 	$context['message'] = isset($_REQUEST['message']) ? str_replace(array('  '), array('&nbsp; '), $smcFunc['htmlspecialchars']($_REQUEST['message'])) : '';
 	$context['reply'] = !empty($_REQUEST['replied_to']);
+	$context['num_allowed_attachments'] = empty($modSettings['attachmentNumPerPMLimit']) ? 50 : min($modSettings['attachmentNumPerPMLimit'] - count($context['current_attachments']) + (isset($deleted_attachments) ? $deleted_attachments : 0), $modSettings['attachmentNumPerPMLimit']);
+	$context['can_post_attachment'] = !empty($modSettings['pmAttachmentEnable']) && $modSettings['pmAttachmentEnable'] == 1 && allowedTo('pm_post_attachments') && $context['num_allowed_attachments'] > 0 ? 1 : 0;	
 
 	if ($context['reply'])
 	{
@@ -2281,6 +2536,18 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 
 	// ... and store the ID again...
 	$context['post_box_name'] = $editorOptions['id'];
+
+
+	// If the user can post attachments prepare the warning labels.
+	if (!empty($context['can_post_attachment']))
+	{
+		$context['allowed_extensions'] = strtr($modSettings['pmAttachmentExtensions'], array(',' => ', '));
+		$context['attachment_restrictions'] = array();
+		$attachmentRestrictionTypes = array('attachmentNumPerPMLimit', 'attachmentPMLimit', 'pmAttachmentSizeLimit');
+		foreach ($attachmentRestrictionTypes as $type)
+			if (!empty($modSettings[$type]))
+				$context['attachment_restrictions'][] = sprintf($txt['attach_restrict_' . $type], $modSettings[$type]);
+	}
 
 	// Check whether we need to show the code again.
 	$context['require_verification'] = !$user_info['is_admin'] && !empty($modSettings['pm_posts_verification']) && $user_info['posts'] < $modSettings['pm_posts_verification'];
@@ -2555,9 +2822,110 @@ function MessagePost2()
 	// Prevent double submission of this form.
 	checkSubmitOnce('check');
 
+	// Check if they are trying to attach a new file...
+	if (!empty($_FILES['attachment']['name'][0]) || !empty($_SESSION['temp_pm_attachments']))
+	{	
+		// Check to make sure everybody can view PM attachments:
+		if (!canViewPMAttachments($recipientList))
+			return messagePostError($post_errors, $namedRecipientList, $recipientList);
+
+		// Verify they can post them (double checking for guests).
+		if (!allowedTo('pm_post_attachments') || $context['user']['is_guest'])
+			fatal_error($txt['pm_attach_not_allowed'], false);
+		
+
+		// Make sure we're uploading to the right place.
+		if (!empty($modSettings['pmCurrentAttachmentUploadDir']))
+		{
+			if (!is_array($modSettings['pmAttachmentUploadDir']))
+				$modSettings['pmAttachmentUploadDir'] = unserialize($modSettings['pmAttachmentUploadDir']);
+
+			// The current directory, of course!
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'][$modSettings['pmCurrentAttachmentUploadDir']];
+		}
+		else
+			$current_attach_dir = $modSettings['pmAttachmentUploadDir'];
+
+		$quantity = 0;
+		$total_size = 0;
+
+		if (!empty($_SESSION['temp_pm_attachments']))
+		{
+			foreach ($_SESSION['temp_pm_attachments'] as $attachID => $name)
+			{
+				if (preg_match('~^post_tmp_' . $user_info['id'] . '_\d+$~', $attachID) == 0)
+					continue;
+
+				if (!empty($_POST['attach_del']) && !in_array($attachID, $_POST['attach_del']))
+				{
+					unset($_SESSION['temp_pm_attachments'][$attachID]);
+					@unlink($current_attach_dir . '/' . $attachID);
+					continue;
+				}
+
+				$_FILES['attachment']['tmp_name'][] = $attachID;
+				$_FILES['attachment']['name'][] = $name;
+				$_FILES['attachment']['size'][] = filesize($current_attach_dir . '/' . $attachID);
+				list ($_FILES['attachment']['width'][], $_FILES['attachment']['height'][]) = @getimagesize($current_attach_dir . '/' . $attachID);
+
+				unset($_SESSION['temp_pm_attachments'][$attachID]);
+			}
+		}
+
+		if (!isset($_FILES['attachment']['name']))
+			$_FILES['attachment']['tmp_name'] = array();
+
+		$attachIDs = array();
+		foreach ($_FILES['attachment']['tmp_name'] as $n => $dummy)
+		{
+			if ($_FILES['attachment']['name'][$n] == '')
+				continue;
+
+			// Have we reached the maximum number of files we are allowed?
+			$quantity++;
+			if (!empty($modSettings['attachmentNumPerPMLimit']) && $quantity > $modSettings['attachmentNumPerPMLimit'])
+				fatal_lang_error('attachments_limit_per_post', false, array($modSettings['attachmentNumPerPMLimit']));
+
+			// Check the total upload size for this post...
+			$total_size += $_FILES['attachment']['size'][$n];
+			if (!empty($modSettings['attachmentPMLimit']) && $total_size > $modSettings['attachmentPMLimit'] * 1024)
+				fatal_lang_error('file_too_big', false, array($modSettings['attachmentPMLimit']));
+
+			$pmAttachmentOptions = array(
+				'pm' => 0,
+				'sender' => $user_info['id'],
+				'name' => $_FILES['attachment']['name'][$n],
+				'tmp_name' => $_FILES['attachment']['tmp_name'][$n],
+				'size' => $_FILES['attachment']['size'][$n],
+			);
+
+			require_once($sourcedir . '/Subs-Post.php');
+
+			if (createPMAttachment($pmAttachmentOptions))
+			{
+				$attachIDs[] = $pmAttachmentOptions['id'];
+				if (!empty($pmAttachmentOptions['thumb']))
+					$attachIDs[] = $pmAttachmentOptions['thumb'];
+			}
+			else
+			{
+				if (in_array('too_large', $pmAttachmentOptions['errors']))
+					fatal_lang_error('file_too_big', false, array($modSettings['pmAttachmentSizeLimit']));
+				if (in_array('bad_extension', $pmAttachmentOptions['errors']))
+					fatal_error($pmAttachmentOptions['name'] . '.<br />' . $txt['pm_cant_upload_type'] . ' ' . $modSettings['pmAttachmentExtensions'] . '.', false);
+				if (in_array('directory_full', $pmAttachmentOptions['errors']))
+					fatal_lang_error('ran_out_of_space', 'critical');
+				if (in_array('bad_filename', $pmAttachmentOptions['errors']))
+					fatal_error(basename($pmAttachmentOptions['name']) . '.<br />' . $txt['pm_restricted_filename'] . '.', 'critical');
+				if (in_array('taken_filename', $pmAttachmentOptions['errors']))
+					fatal_lang_error('filename_exists');
+			}
+		}
+	}
+
 	// Do the actual sending of the PM.
 	if (!empty($recipientList['to']) || !empty($recipientList['bcc']))
-		$context['send_log'] = sendpm($recipientList, $_REQUEST['subject'], $_REQUEST['message'], true, null, !empty($_REQUEST['pm_head']) ? (int) $_REQUEST['pm_head'] : 0);
+		$context['send_log'] = sendpm($recipientList, $_REQUEST['subject'], $_REQUEST['message'], true, null, !empty($_REQUEST['pm_head']) ? (int) $_REQUEST['pm_head'] : 0, empty($attachIDs) ? array() : $attachIDs);
 	else
 		$context['send_log'] = array(
 			'sent' => array(),
@@ -2959,7 +3327,7 @@ function MessagePrune()
  */
 function deleteMessages($personal_messages, $folder = null, $owner = null)
 {
-	global $user_info, $smcFunc;
+	global $user_info, $smcFunc, $sourcedir;
 
 	if ($owner === null)
 		$owner = array($user_info['id']);
@@ -3037,6 +3405,7 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 			WHERE id_member IN ({array_int:member_list})
 				AND deleted = {int:not_deleted}' . $where,
 			array(
+				'blank_string' => '',
 				'member_list' => $owner,
 				'is_deleted' => 1,
 				'not_deleted' => 0,
@@ -3122,6 +3491,33 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 				'pm_list' => $remove_pms,
 			)
 		);
+		
+		// Now that all pm are deleted...
+		// Let's find all attachments and delete them also ;)
+		foreach ($remove_pms as $pm_id)
+		{
+			$request = $smcFunc['db_query']('', '
+				SELECT id_attach
+				FROM {db_prefix}pm_attachments
+				WHERE id_pm = {int:id_pm}',
+				array(
+					'id_pm' => $pm_id,
+				)
+			);
+			
+			$remove_attachments = array();
+			while ($row = $smcFunc['db_fetch_assoc']($request))
+			{
+				$remove_attachments[] = $row['id_attach'];
+			}
+			$smcFunc['db_free_result']($request);
+
+			if (!empty($remove_attachments))
+			{
+				require_once($sourcedir . '/ManageAttachments.php');
+				removePMAttachments(array('id_attach' => $remove_attachments), '', false, true, false);
+			}	
+		}		
 	}
 
 	// Any cached numbers may be wrong now.
@@ -3681,6 +4077,32 @@ function ReportMessage()
 		if ($hidden_recipients)
 			$recipients[] = sprintf($txt['pm_report_pm_hidden'], $hidden_recipients);
 
+		//
+		// PM ATTACHMENTS MOD BEGIN...
+		//
+			
+		// get all attachments sent to this member...
+		$request = $smcFunc['db_query']('', '
+			SELECT
+				pa.id_attach
+			FROM {db_prefix}pm_attachments AS pa
+				INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pa.id_pm)
+			WHERE pa.id_pm = {int:id_pm}',
+			array(
+				'id_pm' => $context['pm_id'],
+			)
+		);
+
+		$attachIDs = array();
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+			$attachIDs[] = $row['id_attach'];
+
+		$smcFunc['db_free_result']($request);
+
+		//
+		// PM ATTACHMENTS MOD END!
+		//
+
 		// Now let's get out and loop through the admins.
 		$request = $smcFunc['db_query']('', '
 			SELECT id_member, real_name, lngfile
@@ -3719,6 +4141,15 @@ function ReportMessage()
 					$report_body .= $txt['pm_report_pm_other_recipients'] . ' ' . implode(', ', $recipients) . "\n\n";
 				$report_body .= $txt['pm_report_pm_unedited_below'] . "\n" . '[quote author=' . (empty($memberFromID) ? '"' . $memberFromName . '"' : $memberFromName . ' link=action=profile;u=' . $memberFromID . ' date=' . $time) . ']' . "\n" . un_htmlspecialchars($body) . '[/quote]';
 
+				//
+				// PM Attachments MOD BEGIN...
+				//
+				if (count($attachIDs) >= 1)
+					$report_body .= $txt['pm_report_attachments_sent'];
+				//
+				// PM Attachments MOD END!
+				//
+				
 				// Plonk it in the array ;)
 				$messagesToSend[$cur_language] = array(
 					'subject' => ($smcFunc['strpos']($subject, $txt['pm_report_pm_subject']) === false ? $txt['pm_report_pm_subject'] : '') . un_htmlspecialchars($subject),
@@ -3735,9 +4166,17 @@ function ReportMessage()
 		}
 		$smcFunc['db_free_result']($request);
 
+		//
+		// PM ATTACHMENTS MOD BEGIN...
+		//
+		
 		// Send a different email for each language.
 		foreach ($messagesToSend as $lang => $message)
-			sendpm($message['recipients'], $message['subject'], $message['body']);
+			sendpm($message['recipients'], $message['subject'], $message['body'], false, null, 0, $attachIDs, true);
+
+		//
+		// PM ATTACHMENTS MOD END!
+		//
 
 		// Give the user their own language back!
 		if (!empty($modSettings['userLanguage']))
