@@ -212,10 +212,6 @@ function error_handler($error_level, $error_string, $file, $line)
 	if (empty($error_match) || empty($modSettings['enableErrorLogging']))
 		return false;
 
-	// Send these notices introduced by PHP 7.2 to where the sun don't shine!
-	if (strpos($error_string, 'create_function()') !== false)
-		return true;
-
 	// Also ignore these deprecation warnings introduced in PHP 8.1.
 	if (defined('PHP_VERSION_ID') && PHP_VERSION_ID >= 80100 && strpos($error_string, 'strftime()') !== false)
 		return true;
