@@ -296,9 +296,7 @@ function ManagePMAttachmentPaths()
 					'value' => $txt['pmattach_current_dir'],
 				),
 				'data' => array(
-					'function' => create_function('$rowData', '
-						return \'<input type="radio" name="current_dir" value="\' . $rowData[\'id\'] . \'" \' . ($rowData[\'current\'] ? \'checked="checked"\' : \'\') . \' class="check" />\';
-					'),
+					'function' => function($rowData) { return '<input type="radio" name="current_dir" value="' . $rowData['id'] . '" ' . ($rowData['current'] ? 'checked="checked"' : '') . ' class="check" />'; },
 					'style' => 'text-align: center; width: 15%;',
 				),
 			),
@@ -307,9 +305,7 @@ function ManagePMAttachmentPaths()
 					'value' => $txt['pmattach_path'],
 				),
 				'data' => array(
-					'function' => create_function('$rowData', '
-						return \'<input type="text" size="50" name="dirs[\' . $rowData[\'id\'] . \']" value="\' . $rowData[\'path\'] . \'" />\';
-					'),
+					'function' => function($rowData) { return '<input type="text" size="50" name="dirs[' . $rowData['id'] . ']" value="' . $rowData['path'] . '" />'; },
 					'style' => 'text-align: center; width: 30%;',
 				),
 			),
