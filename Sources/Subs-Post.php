@@ -1330,16 +1330,15 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 		// PM ATTACHMENTS MOD Begin...
 		//
 		
-		$email_template .= "\n";
 		if (!empty($parent_attachments))
 		{
-			$email_template .= "\n" . $txt['pmattachments_mail'] . "\n";
+      $emaildata['body'] .= "\n";
+			$emaildata['body'] .= "\n" . $txt['pmattachments_mail'] . "\n";
 			
 			foreach ($parent_attachments as $attachID)
-				$email_template .= $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachID . "\n";		
+				$emaildata['body'] .= $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachID . "\n";		
 		}
 
-		$email_template .= "\n" . $txt['instant_reply'] . ' ' . $scripturl . '?action=pm;sa=send;f=inbox;pmsg=' . $id_pm . ';quote;u=' . $from['id'];
 		
 		//
 		// PM ATTACHMENTS MOD END!
