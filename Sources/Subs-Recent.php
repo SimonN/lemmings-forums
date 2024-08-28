@@ -30,12 +30,13 @@ function getLastPosts($latestPostOptions)
 	// @todo SLOW This query is now slow, NEEDS to be fixed.  Maybe break into two?
 	$request = $smcFunc['db_query']('substring', '
 		SELECT
-			m.poster_time, m.subject, m.id_topic, m.id_member, m.id_msg,
+			m.poster_time, mfirst.subject, m.id_topic, m.id_member, m.id_msg,
 			COALESCE(mem.real_name, m.poster_name) AS poster_name, t.id_board, b.name AS board_name,
 			SUBSTRING(m.body, 1, 385) AS body, m.smileys_enabled
 		FROM {db_prefix}messages AS m
 			INNER JOIN {db_prefix}topics AS t ON (t.id_topic = m.id_topic)
 			INNER JOIN {db_prefix}boards AS b ON (b.id_board = t.id_board)
+      INNER JOIN {db_prefix}messages AS mfirst ON (mfirst.id_msg = t.id_first_msg)
 			LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = m.id_member)
 		WHERE m.id_msg >= {int:likely_max_msg}' .
 			(!empty($modSettings['recycle_enable']) && $modSettings['recycle_board'] > 0 ? '
