@@ -220,7 +220,7 @@ For more control over the email notifications you receive, login to the forum an
 	@description:
 */
 $txt['notify_boards_once_body_subject'] = 'New Topic: {TOPICSUBJECT}';
-$txt['notify_boards_once_body_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made on a board you are watching.
+$txt['notify_boards_once_body_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made by {POSTERNAME} on a board you are watching.
 
 You can see it at
 {TOPICLINK}
@@ -243,7 +243,7 @@ Unsubscribe from new topics from this board by using this link:
 	@description:
 */
 $txt['notify_boards_once_subject'] = 'New Topic: {TOPICSUBJECT}';
-$txt['notify_boards_once_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made on a board you are watching.
+$txt['notify_boards_once_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made by {POSTERNAME} on a board you are watching.
 
 You can see it at
 {TOPICLINK}
@@ -264,7 +264,7 @@ Unsubscribe from new topics from this board by using this link:
 	@description:
 */
 $txt['notify_boards_body_subject'] = 'New Topic: {TOPICSUBJECT}';
-$txt['notify_boards_body_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made on a board you are watching.
+$txt['notify_boards_body_body'] = 'A new topic, \'{TOPICSUBJECT}\', has been made by {POSTERNAME} on a board you are watching.
 
 You can see it at
 {TOPICLINK}
