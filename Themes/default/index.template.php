@@ -375,9 +375,6 @@ function template_body_above()
 		</h1>';
 
 	echo '
-		', empty($settings['site_slogan']) ? '<img id="smflogo" src="' . $settings['images_url'] . '/smflogo.svg" alt="Simple Machines Forum" title="Simple Machines Forum">' : '<div id="siteslogan">' . $settings['site_slogan'] . '</div>', '';
-
-	echo '
 	</div>
 	<div id="wrapper">
 		<div id="upper_section">
