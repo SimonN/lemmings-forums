@@ -3406,6 +3406,13 @@ function getLanguages($use_cache = true)
 	return $context['languages'];
 }
 
+function nukeSpoilers(&$text)
+{
+  $text = preg_replace("/\[spoiler(=.*?)?\].*?\\[\/spoiler\]/", "(Spoiler redacted - please go on site to view.)", $text);
+	$text = preg_replace("/\[\/spoiler]/", "", $text);
+	return $text;
+}
+
 /**
  * Replace all vulgar words with respective proper words. (substring or whole words..)
  * What this function does:

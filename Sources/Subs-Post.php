@@ -1309,6 +1309,7 @@ function sendpm($recipients, $subject, $message, $store_outbox = false, $from = 
 				$notification_texts[$lang]['body'] = $message;
 
 				censorText($notification_texts[$lang]['body']);
+        nukeSpoilers($notification_texts[$lang]['body']);
 
 				$notification_texts[$lang]['body'] = trim(un_htmlspecialchars(strip_tags(strtr(parse_bbc($smcFunc['htmlspecialchars']($notification_texts[$lang]['body']), false), array('<br>' => "\n", '</div>' => "\n", '</li>' => "\n", '&#91;' => '[', '&#93;' => ']')))));
 			}

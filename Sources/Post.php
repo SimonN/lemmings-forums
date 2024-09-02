@@ -2754,6 +2754,7 @@ function AnnouncementSend()
 
 	censorText($context['topic_subject']);
 	censorText($message);
+  nukeSpoilers($message);
 
 	$message = trim(un_htmlspecialchars(strip_tags(strtr(parse_bbc($message, false, $id_msg), array('<br>' => "\n", '</div>' => "\n", '</li>' => "\n", '&#91;' => '[', '&#93;' => ']')))));
 
