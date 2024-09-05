@@ -2,4 +2,94 @@
 
 body {
 	background-image: url("../images/background.png");
+  color: #b8b8b8;
+}
+
+strong {
+  color: #b8b8b8;
+}
+
+a, a:visited {
+	color: #68C;
+}
+
+.button, .quickbuttons > li > a, .inline_mod_check {
+	color: #CCC;
+}
+
+#top_section {
+	border-bottom: 1px solid #242;
+}
+
+.navigate_section ul li {
+	text-shadow: 1px 1px 0 #666;  
+}
+
+#wrapper {
+	background: #010;
+	border: 1px solid #363;
+	box-shadow: 0 2px 3px rgba(0, 0, 0, 0.14);
+}
+
+.roundframe {
+  background: #020;
+  border: 1px solid #363;
+}
+
+.titlebg a, .subbg a {
+	background: none;
+	color: #CCC;
+	text-decoration: none;
+}
+
+#ic_recentposts td {
+	border-top: none;
+}
+
+.dropmenu li ul, .top_menu, .dropmenu li li:hover, .button,
+.dropmenu li li:hover > a, .dropmenu li li a:focus, .dropmenu li li a:hover,
+#top_section, .quickbuttons > li,
+.quickbuttons li ul, .quickbuttons li ul li a:hover, .quickbuttons ul li a:focus,
+.inline_mod_check, .popup_window, #inner_section, .post_options ul,
+.post_options ul a:hover, .post_options ul a:focus, .notify_dropdown a:hover, .notify_dropdown a:focus {
+	background: #000;
+	background-image: linear-gradient(#050 0%, #010 70%);
+}
+
+.button:hover, #search_form .button:hover, .quickbuttons li:hover {
+	background: #000;
+	background-image: linear-gradient(to bottom, #010 0%, #050 70%);
+}
+
+.navigate_section ul, .popup_content, .up_contain {
+	background: #000;
+	background-image: linear-gradient(to bottom, #010 0%, #030 95%);
+}
+
+.info .subject {
+	color: #bb3;
+}
+
+.title_bar {
+	border: 1px solid #333;
+	border-top: 2px solid #282;
+	border-bottom: 2px solid #282;
+	background: #373;
+}
+
+div.cat_bar {
+	background: #383;
+}
+
+.up_contain {
+	border: 1px solid #242;
+}
+
+.boardindex_table .board_stats p {
+	border-left: none;
+	border-right: none;
+}
+
+.children {
+	border-top: 1px solid #242;
 }
