@@ -1,5 +1,16 @@
 @import url("../../default/css/index.css");
 
+input, button, select, textarea {
+	color: #ddd;
+  background: #000;
+}
+textarea:hover {
+	background: #010;
+}
+input:focus, textarea:focus, button:focus, select:focus {
+  background: #010;
+}
+
 body {
 	background-image: url("../images/background.png");
   color: #b8b8b8;
@@ -9,8 +20,12 @@ strong {
   color: #b8b8b8;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  color: #b8b8b8;
+}
+
 a, a:visited {
-	color: #68C;
+	color: #8AF;
 }
 
 .button, .quickbuttons > li > a, .inline_mod_check {
@@ -23,6 +38,7 @@ a, a:visited {
 
 .navigate_section ul li {
 	text-shadow: 1px 1px 0 #666;  
+  color: #ccc;
 }
 
 #wrapper {
@@ -61,9 +77,24 @@ a, a:visited {
 	background-image: linear-gradient(to bottom, #010 0%, #050 70%);
 }
 
+.button.active {
+  background: #000;
+	background-image: linear-gradient(#050 0%, #010 70%);
+  border: 1px solid;
+}
+.button.active:hover, .button.active:focus {
+  color: #CCC;
+  background: #000;
+	background-image: linear-gradient(to bottom, #010 0%, #050 70%);
+  border: 1px solid;
+  border-color: #aaa #ddd #ddd #bbb;
+  box-shadow: -1px -1px 2px rgba(221, 221, 221, 0.7), -1px -2px 4px #ddd inset;
+}
+
 .navigate_section ul, .popup_content, .up_contain {
 	background: #000;
 	background-image: linear-gradient(to bottom, #010 0%, #030 95%);
+  border: 1px solid;
 }
 
 .info .subject {
@@ -74,7 +105,7 @@ a, a:visited {
 	border: 1px solid #333;
 	border-top: 2px solid #282;
 	border-bottom: 2px solid #282;
-	background: #373;
+	background: #363;
 }
 
 div.cat_bar {
@@ -92,4 +123,32 @@ div.cat_bar {
 
 .children {
 	border-top: 1px solid #242;
+}
+
+.information {
+	background: #030;
+}
+
+.pagesection .button {
+	color: #CCC;
+}
+
+.windowbg.sticky {
+	background: #040;
+}
+.windowbg:nth-of-type(even), .bg.even {
+	background: #020;
+}
+.windowbg:nth-of-type(odd), .bg.odd {
+	background: #030;
+}
+
+.dropmenu li:hover li a, .dropmenu li li a {
+  color: #ddd;
+}
+
+.errorbox {
+	background-color: #410;
+	border-top: 2px solid #520;
+	border-bottom: 2px solid #520;
 }
