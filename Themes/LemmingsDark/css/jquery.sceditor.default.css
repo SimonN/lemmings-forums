@@ -1,0 +1,6 @@
+html, p, code::before, table {
+  color: #fff;
+}
+table, td {
+	border: 1px dotted #fff;
+}

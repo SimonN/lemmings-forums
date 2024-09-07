@@ -152,3 +152,16 @@ div.cat_bar {
 	border-top: 2px solid #520;
 	border-bottom: 2px solid #520;
 }
+
+.bbc_standard_quote {
+  background-color: #040;
+}
+
+.bbc_spoiler {
+  background: #151;
+  color: #ddd;
+}
+
+.spoiler_content {
+  background: #030;
+}
