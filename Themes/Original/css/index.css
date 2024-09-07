@@ -1,0 +1,5 @@
+@import url("../../default/css/index.css");
+
+#top_section .inner_wrap, #wrapper, #header, #footer .inner_wrap {
+  max-width: none;
+}
