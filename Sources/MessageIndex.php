@@ -712,7 +712,7 @@ function MessageIndex()
 	$context['normal_buttons'] = array();
 
 	if ($context['can_post_new'])
-		$context['normal_buttons']['new_topic'] = array('text' => 'new_topic', 'image' => 'new_topic.png', 'lang' => true, 'url' => $scripturl . '?action=post;board=' . $context['current_board'] . '.0', 'active' => true);
+		$context['normal_buttons']['new_topic'] = array('text' => 'new_topic', 'image' => 'new_topic.png', 'lang' => true, 'url' => $scripturl . '?action=post;board=' . $context['current_board'] . '.0');
 
 	if ($context['can_post_poll'])
 		$context['normal_buttons']['post_poll'] = array('text' => 'new_poll', 'image' => 'new_poll.png', 'lang' => true, 'url' => $scripturl . '?action=post;board=' . $context['current_board'] . '.0;poll');

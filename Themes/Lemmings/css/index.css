@@ -1,0 +1,64 @@
+@import url("../../default/css/index.css");
+
+#top_section .inner_wrap, #wrapper, #header, #footer .inner_wrap {
+  max-width: none;
+}
+
+#wrapper {
+  overflow: hidden;
+}
+
+body {
+  background: #6B6;
+	background-image: url("../images/background.png");
+}
+
+div.cat_bar {
+	background: #484;
+}
+
+.windowbg.sticky {
+  background: #cfe8dc;
+}
+
+
+.dropmenu li ul, .top_menu, .dropmenu li li:hover, .button,
+.dropmenu li li:hover > a, .dropmenu li li a:focus, .dropmenu li li a:hover,
+#top_section, .quickbuttons > li,
+.quickbuttons li ul, .quickbuttons li ul li a:hover, .quickbuttons ul li a:focus,
+.inline_mod_check, .popup_window, #inner_section, .post_options ul,
+.post_options ul a:hover, .post_options ul a:focus, .notify_dropdown a:hover, .notify_dropdown a:focus {
+	background: #FFF;
+	background-image: linear-gradient(#696 0%, #6B6 70%);
+}
+
+.button:hover, #search_form .button:hover, .quickbuttons li:hover {
+	background: #FFF;
+	background-image: linear-gradient(to bottom, #696 0%, #6B6 70%);
+}
+
+.button.active {
+  background: #FFF;
+  color: #346;
+	background-image: linear-gradient(#696 0%, #6B6 70%);
+  border: 1px solid;
+  border-color: #aaa #ddd #ddd #bbb;
+}
+.button.active:hover, .button.active:focus {
+  color: #346;
+  background: #FFF;
+	background-image: linear-gradient(to bottom, #696 0%, #6B6 70%);
+  border: 1px solid;
+  border-color: #aaa #ddd #ddd #bbb;
+  box-shadow: -1px -1px 2px rgba(221, 221, 221, 0.7), -1px -2px 4px #ddd inset;
+}
+
+#content_section {
+  background: #6B6;
+  margin: 0px 2px 2px 2px;
+  border-radius: 0px 0px 7px 7px;
+}
+
+.navigate_section {
+  padding: 3px 2px 0px 2px;
+}

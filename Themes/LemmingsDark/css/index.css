@@ -4,6 +4,10 @@
   max-width: none;
 }
 
+#wrapper {
+  overflow: hidden;
+}
+
 input, button, select, textarea {
 	color: #ddd;
   background: #000;
@@ -159,4 +163,14 @@ div.cat_bar {
 
 .bbc_standard_quote {
   background-color: #040;
+}
+
+.content_section
+{
+  margin: 0px 2px 2px 2px;
+  border-radius: 0px 0px 7px 7px;
+}
+
+#navigate-section {
+  padding: 3px 2px 0px 2px;
 }
