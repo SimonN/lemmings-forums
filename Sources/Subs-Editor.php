@@ -2264,14 +2264,17 @@ function create_control_verification(&$verificationOptions, $do_test = false)
 		{
 			// Bit of a shortcut this.
 			$row = &$modSettings['question_id_cache']['questions'][$q];
-			$thisVerification['questions'][] = array(
-				'id' => $q,
-				'q' => parse_bbc($row['question']),
-				'is_error' => !empty($incorrectQuestions) && in_array($q, $incorrectQuestions),
-				// Remember a previous submission?
-				'a' => isset($_REQUEST[$verificationOptions['id'] . '_vv'], $_REQUEST[$verificationOptions['id'] . '_vv']['q'], $_REQUEST[$verificationOptions['id'] . '_vv']['q'][$q]) ? $smcFunc['htmlspecialchars']($_REQUEST[$verificationOptions['id'] . '_vv']['q'][$q]) : '',
-			);
-			$_SESSION[$verificationOptions['id'] . '_vv']['q'][] = $q;
+      if ($row != null)
+      {
+        $thisVerification['questions'][] = array(
+          'id' => $q,
+          'q' => parse_bbc($row['question']),
+          'is_error' => !empty($incorrectQuestions) && in_array($q, $incorrectQuestions),
+          // Remember a previous submission?
+          'a' => isset($_REQUEST[$verificationOptions['id'] . '_vv'], $_REQUEST[$verificationOptions['id'] . '_vv']['q'], $_REQUEST[$verificationOptions['id'] . '_vv']['q'][$q]) ? $smcFunc['htmlspecialchars']($_REQUEST[$verificationOptions['id'] . '_vv']['q'][$q]) : '',
+        );
+        $_SESSION[$verificationOptions['id'] . '_vv']['q'][] = $q;
+      }
 		}
 	}
 
