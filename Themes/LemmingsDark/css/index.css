@@ -141,14 +141,20 @@ div.cat_bar {
 	color: #CCC;
 }
 
-.windowbg.sticky {
-	background: #040;
-}
 .windowbg:nth-of-type(even), .bg.even {
 	background: #020;
 }
 .windowbg:nth-of-type(odd), .bg.odd {
 	background: #030;
+}
+.windowbg.sticky {
+	background: #040;
+}
+.windowbg.locked {
+  background: #010;
+}
+.windowbg.sticky.locked {
+  background: #010;
 }
 
 .dropmenu li:hover li a, .dropmenu li li a {
