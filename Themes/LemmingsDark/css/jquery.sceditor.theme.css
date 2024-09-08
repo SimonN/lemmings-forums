@@ -1,0 +1,15 @@
+.sceditor-container {
+  background: #001800;
+  border-color: #363;
+}
+
+div.sceditor-toolbar {
+  background: #001800;
+  border-color: #363;
+}
+
+.sceditor-container iframe,
+.sceditor-container textarea {
+  background: #000;
+  color: #fff;
+}

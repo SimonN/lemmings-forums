@@ -1,0 +1,11 @@
+@import url("../../default/css/spoiler.css");
+
+/* Default theme */
+.bbc_spoiler {
+	background: #151;
+	color: #ddd;
+}
+
+.bbc_spoiler .spoiler_content {
+	background: #030;
+}

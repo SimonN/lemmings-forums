@@ -1,46 +1,37 @@
 <?php
 
 /**
+ * Provide a display for forum statistics
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.15
+ * @version 2.1.0
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This function has only one job: providing a display for forum statistics.
-	As such, it has only one function:
-
-	void DisplayStats()
-		- gets all the statistics in order and puts them in.
-		- uses the Stats template and language file. (and main sub template.)
-		- requires the view_stats permission.
-		- accessed from ?action=stats.
-
-	void getDailyStats(string $condition)
-		- called by DisplayStats().
-		- loads the statistics on a daily basis in $context.
-
-	void SMStats()
-		- called by simplemachines.org.
-		- only returns anything if stats was enabled during installation.
-		- can also be accessed by the admin, to show what stats sm.org collects.
-		- does not return any data directly to sm.org, instead starts a new request for security.
-
-*/
-
-// Display some useful/interesting board statistics.
+/**
+ * Display some useful/interesting board statistics.
+ *
+ * gets all the statistics in order and puts them in.
+ * uses the Stats template and language file. (and main sub template.)
+ * requires the view_stats permission.
+ * accessed from ?action=stats.
+ */
 function DisplayStats()
 {
-	global $txt, $scripturl, $modSettings, $user_info, $context, $smcFunc;
+	global $txt, $scripturl, $modSettings, $context, $smcFunc;
 
 	isAllowedTo('view_stats');
+	// Page disabled - redirect them out
+	if (empty($modSettings['trackStats']))
+		fatal_lang_error('feature_disabled', true);
 
 	if (!empty($_REQUEST['expand']))
 	{
@@ -69,6 +60,11 @@ function DisplayStats()
 			obExit(false);
 
 		$context['sub_template'] = 'stats';
+		$context['yearly'] = array();
+
+		if (empty($month) || empty($year))
+			return;
+
 		getDailyStats('YEAR(date) = {int:year} AND MONTH(date) = {int:month}', array('year' => $year, 'month' => $month));
 		$context['yearly'][$year]['months'][$month]['date'] = array(
 			'month' => sprintf('%02d', $month),
@@ -79,6 +75,7 @@ function DisplayStats()
 
 	loadLanguage('Stats');
 	loadTemplate('Stats');
+	loadJavaScriptFile('stats.js', array('default_theme' => true, 'defer' => false, 'minimize' => true), 'smf_stats');
 
 	// Build the link tree......
 	$context['linktree'][] = array(
@@ -157,47 +154,55 @@ function DisplayStats()
 	);
 	$context['latest_member'] = &$context['common_stats']['latest_member'];
 
-	// Male vs. female ratio - let's calculate this only every four minutes.
-	if (($context['gender'] = cache_get_data('stats_gender', 240)) == null)
+	// Let's calculate gender stats only every four minutes.
+	$disabled_fields = isset($modSettings['disabled_profile_fields']) ? explode(',', $modSettings['disabled_profile_fields']) : array();
+	if (!in_array('gender', $disabled_fields))
 	{
-		$result = $smcFunc['db_query']('', '
-			SELECT COUNT(*) AS total_members, gender
-			FROM {db_prefix}members
-			GROUP BY gender',
-			array(
-			)
-		);
-		$context['gender'] = array();
-		while ($row = $smcFunc['db_fetch_assoc']($result))
+		if (($context['gender'] = cache_get_data('stats_gender', 240)) == null)
 		{
-			// Assuming we're telling... male or female?
-			if (!empty($row['gender']))
-				$context['gender'][$row['gender'] == 2 ? 'females' : 'males'] = $row['total_members'];
+			$result = $smcFunc['db_query']('', '
+				SELECT default_value
+				FROM {db_prefix}custom_fields
+				WHERE col_name= {string:gender_var}',
+				array(
+					'gender_var' => 'cust_gender',
+				)
+			);
+			$row = $smcFunc['db_fetch_assoc']($result);
+			$default_gender = !empty($row['default_value']) ? $row['default_value'] : '{gender_0}';
+			$smcFunc['db_free_result']($result);
+
+			$result = $smcFunc['db_query']('', '
+				SELECT COUNT(*) AS total_members, value AS gender
+				FROM {db_prefix}members AS mem
+				INNER JOIN {db_prefix}themes AS t ON (
+					t.id_member = mem.id_member
+					AND t.variable = {string:gender_var}
+					AND t.id_theme = {int:default_theme}
+				)
+				WHERE is_activated = {int:is_activated}
+				GROUP BY value',
+				array(
+					'gender_var' => 'cust_gender',
+					'default_theme' => 1,
+					'is_activated' => 1,
+					'default_gender' => $default_gender,
+				)
+			);
+			$context['gender'] = array($default_gender => 0);
+			while ($row = $smcFunc['db_fetch_assoc']($result))
+			{
+				$context['gender'][$row['gender']] = $row['total_members'];
+			}
+			$smcFunc['db_free_result']($result);
+
+			$context['gender'][$default_gender] += $modSettings['totalMembers'] - array_sum($context['gender']);
+
+			cache_put_data('stats_gender', $context['gender'], 240);
 		}
-		$smcFunc['db_free_result']($result);
-
-		// Set these two zero if the didn't get set at all.
-		if (empty($context['gender']['males']))
-			$context['gender']['males'] = 0;
-		if (empty($context['gender']['females']))
-			$context['gender']['females'] = 0;
-
-		// Try and come up with some "sensible" default states in case of a non-mixed board.
-		if ($context['gender']['males'] == $context['gender']['females'])
-			$context['gender']['ratio'] = '1:1';
-		elseif ($context['gender']['males'] == 0)
-			$context['gender']['ratio'] = '0:1';
-		elseif ($context['gender']['females'] == 0)
-			$context['gender']['ratio'] = '1:0';
-		elseif ($context['gender']['males'] > $context['gender']['females'])
-			$context['gender']['ratio'] = round($context['gender']['males'] / $context['gender']['females'], 1) . ':1';
-		elseif ($context['gender']['females'] > $context['gender']['males'])
-			$context['gender']['ratio'] = '1:' . round($context['gender']['females'] / $context['gender']['males'], 1);
-
-		cache_put_data('stats_gender', $context['gender'], 240);
 	}
 
-	$date = strftime('%Y-%m-%d', forum_time(false));
+	$date = smf_strftime('%Y-%m-%d', time());
 
 	// Members online so far today.
 	$result = $smcFunc['db_query']('', '
@@ -225,14 +230,14 @@ function DisplayStats()
 			'no_posts' => 0,
 		)
 	);
-	$context['top_posters'] = array();
+	$context['stats_blocks']['posters'] = array();
 	$max_num_posts = 1;
 	while ($row_members = $smcFunc['db_fetch_assoc']($members_result))
 	{
-		$context['top_posters'][] = array(
+		$context['stats_blocks']['posters'][] = array(
 			'name' => $row_members['real_name'],
 			'id' => $row_members['id_member'],
-			'num_posts' => $row_members['posts'],
+			'num' => $row_members['posts'],
 			'href' => $scripturl . '?action=profile;u=' . $row_members['id_member'],
 			'link' => '<a href="' . $scripturl . '?action=profile;u=' . $row_members['id_member'] . '">' . $row_members['real_name'] . '</a>'
 		);
@@ -242,10 +247,10 @@ function DisplayStats()
 	}
 	$smcFunc['db_free_result']($members_result);
 
-	foreach ($context['top_posters'] as $i => $poster)
+	foreach ($context['stats_blocks']['posters'] as $i => $poster)
 	{
-		$context['top_posters'][$i]['post_percent'] = round(($poster['num_posts'] * 100) / $max_num_posts);
-		$context['top_posters'][$i]['num_posts'] = comma_format($context['top_posters'][$i]['num_posts']);
+		$context['stats_blocks']['posters'][$i]['percent'] = round(($poster['num'] * 100) / $max_num_posts);
+		$context['stats_blocks']['posters'][$i]['num'] = comma_format($context['stats_blocks']['posters'][$i]['num']);
 	}
 
 	// Board top 10.
@@ -262,14 +267,14 @@ function DisplayStats()
 			'blank_redirect' => '',
 		)
 	);
-	$context['top_boards'] = array();
+	$context['stats_blocks']['boards'] = array();
 	$max_num_posts = 1;
 	while ($row_board = $smcFunc['db_fetch_assoc']($boards_result))
 	{
-		$context['top_boards'][] = array(
+		$context['stats_blocks']['boards'][] = array(
 			'id' => $row_board['id_board'],
 			'name' => $row_board['name'],
-			'num_posts' => $row_board['num_posts'],
+			'num' => $row_board['num_posts'],
 			'href' => $scripturl . '?board=' . $row_board['id_board'] . '.0',
 			'link' => '<a href="' . $scripturl . '?board=' . $row_board['id_board'] . '.0">' . $row_board['name'] . '</a>'
 		);
@@ -279,10 +284,10 @@ function DisplayStats()
 	}
 	$smcFunc['db_free_result']($boards_result);
 
-	foreach ($context['top_boards'] as $i => $board)
+	foreach ($context['stats_blocks']['boards'] as $i => $board)
 	{
-		$context['top_boards'][$i]['post_percent'] = round(($board['num_posts'] * 100) / $max_num_posts);
-		$context['top_boards'][$i]['num_posts'] = comma_format($context['top_boards'][$i]['num_posts']);
+		$context['stats_blocks']['boards'][$i]['percent'] = round(($board['num'] * 100) / $max_num_posts);
+		$context['stats_blocks']['boards'][$i]['num'] = comma_format($context['stats_blocks']['boards'][$i]['num']);
 	}
 
 	// Are you on a larger forum?  If so, let's try to limit the number of topics we search through.
@@ -326,13 +331,14 @@ function DisplayStats()
 			'is_approved' => 1,
 		)
 	);
-	$context['top_topics_replies'] = array();
+	$context['stats_blocks']['topics_replies'] = array();
 	$max_num_replies = 1;
+
 	while ($row_topic_reply = $smcFunc['db_fetch_assoc']($topic_reply_result))
 	{
 		censorText($row_topic_reply['subject']);
 
-		$context['top_topics_replies'][] = array(
+		$context['stats_blocks']['topics_replies'][] = array(
 			'id' => $row_topic_reply['id_topic'],
 			'board' => array(
 				'id' => $row_topic_reply['id_board'],
@@ -341,7 +347,7 @@ function DisplayStats()
 				'link' => '<a href="' . $scripturl . '?board=' . $row_topic_reply['id_board'] . '.0">' . $row_topic_reply['name'] . '</a>'
 			),
 			'subject' => $row_topic_reply['subject'],
-			'num_replies' => $row_topic_reply['num_replies'],
+			'num' => $row_topic_reply['num_replies'],
 			'href' => $scripturl . '?topic=' . $row_topic_reply['id_topic'] . '.0',
 			'link' => '<a href="' . $scripturl . '?topic=' . $row_topic_reply['id_topic'] . '.0">' . $row_topic_reply['subject'] . '</a>'
 		);
@@ -351,10 +357,10 @@ function DisplayStats()
 	}
 	$smcFunc['db_free_result']($topic_reply_result);
 
-	foreach ($context['top_topics_replies'] as $i => $topic)
+	foreach ($context['stats_blocks']['topics_replies'] as $i => $topic)
 	{
-		$context['top_topics_replies'][$i]['post_percent'] = round(($topic['num_replies'] * 100) / $max_num_replies);
-		$context['top_topics_replies'][$i]['num_replies'] = comma_format($context['top_topics_replies'][$i]['num_replies']);
+		$context['stats_blocks']['topics_replies'][$i]['percent'] = round(($topic['num'] * 100) / $max_num_replies);
+		$context['stats_blocks']['topics_replies'][$i]['num'] = comma_format($context['stats_blocks']['topics_replies'][$i]['num']);
 	}
 
 	// Large forums may need a bit more prodding...
@@ -396,13 +402,13 @@ function DisplayStats()
 			'is_approved' => 1,
 		)
 	);
-	$context['top_topics_views'] = array();
-	$max_num_views = 1;
+	$context['stats_blocks']['topics_views'] = array();
+	$max_num = 1;
 	while ($row_topic_views = $smcFunc['db_fetch_assoc']($topic_view_result))
 	{
 		censorText($row_topic_views['subject']);
 
-		$context['top_topics_views'][] = array(
+		$context['stats_blocks']['topics_views'][] = array(
 			'id' => $row_topic_views['id_topic'],
 			'board' => array(
 				'id' => $row_topic_views['id_board'],
@@ -411,20 +417,20 @@ function DisplayStats()
 				'link' => '<a href="' . $scripturl . '?board=' . $row_topic_views['id_board'] . '.0">' . $row_topic_views['name'] . '</a>'
 			),
 			'subject' => $row_topic_views['subject'],
-			'num_views' => $row_topic_views['num_views'],
+			'num' => $row_topic_views['num_views'],
 			'href' => $scripturl . '?topic=' . $row_topic_views['id_topic'] . '.0',
 			'link' => '<a href="' . $scripturl . '?topic=' . $row_topic_views['id_topic'] . '.0">' . $row_topic_views['subject'] . '</a>'
 		);
 
-		if ($max_num_views < $row_topic_views['num_views'])
-			$max_num_views = $row_topic_views['num_views'];
+		if ($max_num < $row_topic_views['num_views'])
+			$max_num = $row_topic_views['num_views'];
 	}
 	$smcFunc['db_free_result']($topic_view_result);
 
-	foreach ($context['top_topics_views'] as $i => $topic)
+	foreach ($context['stats_blocks']['topics_views'] as $i => $topic)
 	{
-		$context['top_topics_views'][$i]['post_percent'] = round(($topic['num_views'] * 100) / $max_num_views);
-		$context['top_topics_views'][$i]['num_views'] = comma_format($context['top_topics_views'][$i]['num_views']);
+		$context['stats_blocks']['topics_views'][$i]['percent'] = round(($topic['num'] * 100) / $max_num);
+		$context['stats_blocks']['topics_views'][$i]['num'] = comma_format($context['stats_blocks']['topics_views'][$i]['num']);
 	}
 
 	// Try to cache this when possible, because it's a little unavoidably slow.
@@ -453,59 +459,64 @@ function DisplayStats()
 		$members = array(0 => 0);
 
 	// Topic poster top 10.
-	$members_result = $smcFunc['db_query']('top_topic_starters', '
+	$members_result = $smcFunc['db_query']('', '
 		SELECT id_member, real_name
 		FROM {db_prefix}members
-		WHERE id_member IN ({array_int:member_list})
-		ORDER BY FIND_IN_SET(id_member, {string:top_topic_posters})
-		LIMIT 10',
+		WHERE id_member IN ({array_int:member_list})',
 		array(
 			'member_list' => array_keys($members),
-			'top_topic_posters' => implode(',', array_keys($members)),
 		)
 	);
-	$context['top_starters'] = array();
-	$max_num_topics = 1;
+	$context['stats_blocks']['starters'] = array();
+	$max_num = 1;
 	while ($row_members = $smcFunc['db_fetch_assoc']($members_result))
 	{
-		$context['top_starters'][] = array(
+		$i = array_search($row_members['id_member'], array_keys($members));
+		// skip all not top 10
+		if ($i > 10)
+			continue;
+
+		$context['stats_blocks']['starters'][$i] = array(
 			'name' => $row_members['real_name'],
 			'id' => $row_members['id_member'],
-			'num_topics' => $members[$row_members['id_member']],
+			'num' => $members[$row_members['id_member']],
 			'href' => $scripturl . '?action=profile;u=' . $row_members['id_member'],
 			'link' => '<a href="' . $scripturl . '?action=profile;u=' . $row_members['id_member'] . '">' . $row_members['real_name'] . '</a>'
 		);
 
-		if ($max_num_topics < $members[$row_members['id_member']])
-			$max_num_topics = $members[$row_members['id_member']];
+		if ($max_num < $members[$row_members['id_member']])
+			$max_num = $members[$row_members['id_member']];
 	}
+	ksort($context['stats_blocks']['starters']);
 	$smcFunc['db_free_result']($members_result);
 
-	foreach ($context['top_starters'] as $i => $topic)
+	foreach ($context['stats_blocks']['starters'] as $i => $topic)
 	{
-		$context['top_starters'][$i]['post_percent'] = round(($topic['num_topics'] * 100) / $max_num_topics);
-		$context['top_starters'][$i]['num_topics'] = comma_format($context['top_starters'][$i]['num_topics']);
+		$context['stats_blocks']['starters'][$i]['percent'] = round(($topic['num'] * 100) / $max_num);
+		$context['stats_blocks']['starters'][$i]['num'] = comma_format($context['stats_blocks']['starters'][$i]['num']);
 	}
 
 	// Time online top 10.
 	$temp = cache_get_data('stats_total_time_members', 600);
 	$members_result = $smcFunc['db_query']('', '
 		SELECT id_member, real_name, total_time_logged_in
-		FROM {db_prefix}members' . (!empty($temp) ? '
-		WHERE id_member IN ({array_int:member_list_cached})' : '') . '
+		FROM {db_prefix}members
+		WHERE is_activated = {int:is_activated}' .
+		(!empty($temp) ? ' AND id_member IN ({array_int:member_list_cached})' : '') . '
 		ORDER BY total_time_logged_in DESC
 		LIMIT 20',
 		array(
 			'member_list_cached' => $temp,
+			'is_activated' => 1,
 		)
 	);
-	$context['top_time_online'] = array();
+	$context['stats_blocks']['time_online'] = array();
 	$temp2 = array();
 	$max_time_online = 1;
 	while ($row_members = $smcFunc['db_fetch_assoc']($members_result))
 	{
 		$temp2[] = (int) $row_members['id_member'];
-		if (count($context['top_time_online']) >= 10)
+		if (count($context['stats_blocks']['time_online']) >= 10)
 			continue;
 
 		// Figure out the days, hours and minutes.
@@ -515,15 +526,15 @@ function DisplayStats()
 		// Figure out which things to show... (days, hours, minutes, etc.)
 		$timelogged = '';
 		if ($timeDays > 0)
-			$timelogged .= $timeDays . $txt['totalTimeLogged5'];
+			$timelogged .= $timeDays . $txt['total_time_logged_d'];
 		if ($timeHours > 0)
-			$timelogged .= $timeHours . $txt['totalTimeLogged6'];
-		$timelogged .= floor(($row_members['total_time_logged_in'] % 3600) / 60) . $txt['totalTimeLogged7'];
+			$timelogged .= $timeHours . $txt['total_time_logged_h'];
+		$timelogged .= floor(($row_members['total_time_logged_in'] % 3600) / 60) . $txt['total_time_logged_m'];
 
-		$context['top_time_online'][] = array(
+		$context['stats_blocks']['time_online'][] = array(
 			'id' => $row_members['id_member'],
 			'name' => $row_members['real_name'],
-			'time_online' => $timelogged,
+			'num' => $timelogged,
 			'seconds_online' => $row_members['total_time_logged_in'],
 			'href' => $scripturl . '?action=profile;u=' . $row_members['id_member'],
 			'link' => '<a href="' . $scripturl . '?action=profile;u=' . $row_members['id_member'] . '">' . $row_members['real_name'] . '</a>'
@@ -534,12 +545,98 @@ function DisplayStats()
 	}
 	$smcFunc['db_free_result']($members_result);
 
-	foreach ($context['top_time_online'] as $i => $member)
-		$context['top_time_online'][$i]['time_percent'] = round(($member['seconds_online'] * 100) / $max_time_online);
+	foreach ($context['stats_blocks']['time_online'] as $i => $member)
+		$context['stats_blocks']['time_online'][$i]['percent'] = round(($member['seconds_online'] * 100) / $max_time_online);
 
 	// Cache the ones we found for a bit, just so we don't have to look again.
 	if ($temp !== $temp2)
 		cache_put_data('stats_total_time_members', $temp2, 480);
+
+	// Likes.
+	if (!empty($modSettings['enable_likes']))
+	{
+		// Liked messages top 10.
+		$context['stats_blocks']['liked_messages'] = array();
+		$max_liked_message = 1;
+		$liked_messages = $smcFunc['db_query']('', '
+			SELECT m.id_msg, m.subject, m.likes, m.id_board, m.id_topic, t.approved
+			FROM (
+				SELECT n.id_msg, n.subject, n.likes, n.id_board, n.id_topic
+				FROM {db_prefix}messages as n
+				ORDER BY n.likes DESC
+				LIMIT 1000
+			) AS m
+				INNER JOIN {db_prefix}topics AS t ON (m.id_topic = t.id_topic)
+				INNER JOIN {db_prefix}boards AS b ON (b.id_board = t.id_board' . (!empty($modSettings['recycle_enable']) && $modSettings['recycle_board'] > 0 ? '
+					AND b.id_board != {int:recycle_board}' : '') . ')
+			WHERE m.likes > 0 AND {query_see_board}' . ($modSettings['postmod_active'] ? '
+				AND t.approved = {int:is_approved}' : '') . '
+			ORDER BY m.likes DESC
+			LIMIT 10',
+			array(
+				'recycle_board' => $modSettings['recycle_board'],
+				'is_approved' => 1,
+			)
+		);
+
+		while ($row_liked_message = $smcFunc['db_fetch_assoc']($liked_messages))
+		{
+			censorText($row_liked_message['subject']);
+
+			$context['stats_blocks']['liked_messages'][] = array(
+				'id' => $row_liked_message['id_topic'],
+				'subject' => $row_liked_message['subject'],
+				'num' => $row_liked_message['likes'],
+				'href' => $scripturl . '?msg=' . $row_liked_message['id_msg'],
+				'link' => '<a href="' . $scripturl . '?msg=' . $row_liked_message['id_msg'] . '">' . $row_liked_message['subject'] . '</a>'
+			);
+
+			if ($max_liked_message < $row_liked_message['likes'])
+				$max_liked_message = $row_liked_message['likes'];
+		}
+		$smcFunc['db_free_result']($liked_messages);
+
+		foreach ($context['stats_blocks']['liked_messages'] as $i => $liked_messages)
+			$context['stats_blocks']['liked_messages'][$i]['percent'] = round(($liked_messages['num'] * 100) / $max_liked_message);
+
+		// Liked users top 10.
+		$context['stats_blocks']['liked_users'] = array();
+		$max_liked_users = 1;
+		$liked_users = $smcFunc['db_query']('', '
+			SELECT m.id_member AS liked_user, COUNT(l.content_id) AS count, mem.real_name
+			FROM {db_prefix}user_likes AS l
+				INNER JOIN {db_prefix}messages AS m ON (l.content_id = m.id_msg)
+				INNER JOIN {db_prefix}members AS mem ON (m.id_member = mem.id_member)
+			WHERE content_type = {literal:msg}
+				AND m.id_member > {int:zero}
+			GROUP BY m.id_member, mem.real_name
+			ORDER BY count DESC
+			LIMIT 10',
+			array(
+				'no_posts' => 0,
+				'zero' => 0,
+			)
+		);
+
+		while ($row_liked_users = $smcFunc['db_fetch_assoc']($liked_users))
+		{
+			$context['stats_blocks']['liked_users'][] = array(
+				'id' => $row_liked_users['liked_user'],
+				'num' => $row_liked_users['count'],
+				'href' => $scripturl . '?action=profile;u=' . $row_liked_users['liked_user'],
+				'name' => $row_liked_users['real_name'],
+				'link' => '<a href="' . $scripturl . '?action=profile;u=' . $row_liked_users['liked_user'] . '">' . $row_liked_users['real_name'] . '</a>',
+			);
+
+			if ($max_liked_users < $row_liked_users['count'])
+				$max_liked_users = $row_liked_users['count'];
+		}
+
+		$smcFunc['db_free_result']($liked_users);
+
+		foreach ($context['stats_blocks']['liked_users'] as $i => $liked_users)
+			$context['stats_blocks']['liked_users'][$i]['percent'] = round(($liked_users['num'] * 100) / $max_liked_users);
+	}
 
 	// Activity by month.
 	$months_result = $smcFunc['db_query']('', '
@@ -577,8 +674,8 @@ function DisplayStats()
 				'year' => $row_months['stats_year']
 			),
 			'href' => $scripturl . '?action=stats;' . ($expanded ? 'collapse' : 'expand') . '=' . $ID_MONTH . '#m' . $ID_MONTH,
-			'link' => '<a href="' . $scripturl . '?action=stats;' . ($expanded ? 'collapse' : 'expand') . '=' . $ID_MONTH . '#m' . $ID_MONTH . '">' . $txt['months'][(int) $row_months['stats_month']] . ' ' . $row_months['stats_year'] . '</a>',
-			'month' => $txt['months'][(int) $row_months['stats_month']],
+			'link' => '<a href="' . $scripturl . '?action=stats;' . ($expanded ? 'collapse' : 'expand') . '=' . $ID_MONTH . '#m' . $ID_MONTH . '">' . $txt['months_titles'][(int) $row_months['stats_month']] . ' ' . $row_months['stats_year'] . '</a>',
+			'month' => $txt['months_titles'][(int) $row_months['stats_month']],
 			'year' => $row_months['stats_year'],
 			'new_topics' => comma_format($row_months['topics']),
 			'new_posts' => comma_format($row_months['posts']),
@@ -618,6 +715,9 @@ function DisplayStats()
 			$context['collapsed_years'][] = $year;
 	}
 
+	// Custom stats (just add a template_layer to add it to the template!)
+	call_integration_hook('integrate_forum_stats');
+
 	if (empty($_SESSION['expanded_stats']))
 		return;
 
@@ -638,6 +738,13 @@ function DisplayStats()
 	getDailyStats(implode(' OR ', $condition_text), $condition_params);
 }
 
+/**
+ * Loads the statistics on a daily basis in $context.
+ * called by DisplayStats().
+ *
+ * @param string $condition_string An SQL condition string
+ * @param array $condition_parameters Parameters for $condition_string
+ */
 function getDailyStats($condition_string, $condition_parameters = array())
 {
 	global $context, $smcFunc;
@@ -664,19 +771,18 @@ function getDailyStats($condition_string, $condition_parameters = array())
 	$smcFunc['db_free_result']($days_result);
 }
 
-// This is the function which returns stats to simplemachines.org IF enabled!
-// See http://www.simplemachines.org/about/stats.php for more info.
+/**
+ * This is the function which returns stats to simplemachines.org IF enabled!
+ * called by simplemachines.org.
+ * only returns anything if stats was enabled during installation.
+ * can also be accessed by the admin, to show what stats sm.org collects.
+ * does not return any data directly to sm.org, instead starts a new request for security.
+ *
+ * @link https://www.simplemachines.org/about/stats.php for more info.
+ */
 function SMStats()
 {
-	global $modSettings, $user_info, $forum_version, $sourcedir;
-
-	// Is this the old settings (upgrade failure)?
-	if (!empty($modSettings['allow_sm_stats']))
-	{
-		$modSettings['enable_sm_stats'] = 1;
-		$modSettings['sm_stats_key'] = $modSettings['allow_sm_stats'];
-		unset($modSettings['allow_sm_stats']);
-	}
+	global $modSettings, $user_info, $sourcedir;
 
 	// First, is it disabled?
 	if (empty($modSettings['enable_sm_stats']) || empty($modSettings['sm_stats_key']))
@@ -709,7 +815,7 @@ function SMStats()
 		'php_version' => $serverVersions['php']['version'],
 		'database_type' => strtolower($serverVersions['db_engine']['version']),
 		'database_version' => $serverVersions['db_server']['version'],
-		'smf_version' => $forum_version,
+		'smf_version' => SMF_FULL_VERSION,
 		'smfd_version' => $modSettings['smfVersion'],
 	);
 
@@ -726,16 +832,19 @@ function SMStats()
 	else
 	{
 		// Connect to the collection script.
-		$fp = @fsockopen('www.simplemachines.org', 80, $errno, $errstr);
+		$fp = @fsockopen('www.simplemachines.org', 443, $errno, $errstr);
+		if (!$fp)
+			$fp = @fsockopen('www.simplemachines.org', 80, $errno, $errstr);
 		if ($fp)
 		{
 			$length = strlen($stats_to_send);
 
 			$out = 'POST /smf/stats/collect_stats.php HTTP/1.1' . "\r\n";
 			$out .= 'Host: www.simplemachines.org' . "\r\n";
-			$out .= 'Content-Type: application/x-www-form-urlencoded' . "\r\n";
-			$out .= 'Connection: Close' . "\r\n";
-			$out .= 'Content-Length: ' . $length . "\r\n\r\n";
+			$out .= 'user-agent: '. SMF_USER_AGENT . "\r\n";
+			$out .= 'content-type: application/x-www-form-urlencoded' . "\r\n";
+			$out .= 'connection: Close' . "\r\n";
+			$out .= 'content-length: ' . $length . "\r\n\r\n";
 			$out .= $stats_to_send . "\r\n";
 			fwrite($fp, $out);
 			fclose($fp);

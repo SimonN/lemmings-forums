@@ -1,105 +1,31 @@
 <?php
 
 /**
+ * This file is mainly meant for controlling the actions related to personal
+ * messages. It allows viewing, sending, deleting, and marking personal
+ * messages. For compatibility reasons, they are often called "instant messages".
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2023 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.16
+ * @version 2.1.4
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file is mainly meant for viewing personal messages.  It also sends,
-	deletes, and marks personal messages.  For compatibility reasons, they are
-	often called "instant messages".  The following functions are used:
-
-	void MessageMain()
-		// !!! ?action=pm
-
-	void messageIndexBar(string area)
-		// !!!
-
-	void MessageFolder()
-		// !!! ?action=pm;sa=folder
-
-	void prepareMessageContext(type reset = 'subject', bool reset = false)
-		// !!!
-
-	void MessageSearch()
-		// !!!
-
-	void MessageSearch2()
-		// !!!
-
-	void MessagePost()
-		// !!! ?action=pm;sa=post
-
-	void messagePostError(array error_types, array named_recipients, array recipient_ids)
-		// !!!
-
-	void MessagePost2()
-		// !!! ?action=pm;sa=post2
-
-	void WirelessAddBuddy()
-		// !!!
-
-	void MessageActionsApply()
-		// !!! ?action=pm;sa=pmactions
-
-	void MessageKillAllQuery()
-		// !!! ?action=pm;sa=killall
-
-	void MessageKillAll()
-		// !!! ?action=pm;sa=killall2
-
-	void MessagePrune()
-		// !!! ?action=pm;sa=prune
-
-	void deleteMessages(array personal_messages, string folder,
-			int owner = user)
-		// !!!
-
-	void markMessages(array personal_messages = all, int label = all,
-			int owner = user)
-		- marks the specified personal_messages read.
-		- if label is set, only marks messages with that label.
-		- if owner is set, marks messages owned by that member id.
-
-	void ManageLabels()
-		// !!!
-
-	void MessageSettings()
-		// !!!
-
-	void ReportMessage()
-		- allows the user to report a personal message to an administrator.
-		- in the first instance requires that the ID of the message to report
-		  is passed through $_GET.
-		- allows the user to report to either a particular administrator - or
-		  the whole admin team.
-		- will forward on a copy of the original message without allowing the
-		  reporter to make changes.
-		- uses the report_message sub-template.
-
-	void ManageRules()
-		// !!!
-
-	void LoadRules()
-		// !!!
-
-	void ApplyRules()
-		// !!!
-*/
-
-// This helps organize things...
+/**
+ * This helps organize things...
+ *
+ * @todo this should be a simple dispatcher....
+ */
 function MessageMain()
 {
-	global $txt, $scripturl, $sourcedir, $context, $user_info, $user_settings, $smcFunc, $modSettings;
+	global $txt, $scripturl, $sourcedir, $context, $user_info, $user_settings, $smcFunc, $modSettings, $options;
 
 	// No guests!
 	is_not_guest();
@@ -109,14 +35,13 @@ function MessageMain()
 
 	// This file contains the basic functions for sending a PM.
 	require_once($sourcedir . '/Subs-Post.php');
+	require_once($sourcedir . '/Subs-PMAttachments.php');
+	Add_PM_JavaScript();
 
-	loadLanguage('PersonalMessage');
+	loadLanguage('PersonalMessage+Drafts');
+	loadLanguage('PMAttachments');
 
-	if (WIRELESS && WIRELESS_PROTOCOL == 'wap')
-		fatal_lang_error('wireless_error_notyet', false);
-	elseif (WIRELESS)
-		$context['sub_template'] = WIRELESS_PROTOCOL . '_pm';
-	else
+	if (!isset($_REQUEST['xml']))
 		loadTemplate('PersonalMessage');
 
 	// Load up the members maximum message capacity.
@@ -124,7 +49,7 @@ function MessageMain()
 		$context['message_limit'] = 0;
 	elseif (($context['message_limit'] = cache_get_data('msgLimit:' . $user_info['id'], 360)) === null)
 	{
-		// !!! Why do we do this?  It seems like if they have any limit we should use it.
+		// @todo Why do we do this?  It seems like if they have any limit we should use it.
 		$request = $smcFunc['db_query']('', '
 			SELECT MAX(max_messages) AS top_limit, MIN(max_messages) AS bottom_limit
 			FROM {db_prefix}membergroups
@@ -160,17 +85,14 @@ function MessageMain()
 	if (isset($_GET['done']) && ($_GET['done'] == 'sent'))
 		$context['pm_sent'] = true;
 
-	// Now we have the labels, and assuming we have unsorted mail, apply our rules!
-	if ($user_settings['new_pm'])
+	$context['labels'] = array();
+
+	// Load the label data.
+	if ($user_settings['new_pm'] || ($context['labels'] = cache_get_data('labelCounts:' . $user_info['id'], 720)) === null)
 	{
-		$context['labels'] = $user_settings['message_labels'] == '' ? array() : explode(',', $user_settings['message_labels']);
-		foreach ($context['labels'] as $id_label => $label_name)
-			$context['labels'][(int) $id_label] = array(
-				'id' => $id_label,
-				'name' => trim($label_name),
-				'messages' => 0,
-				'unread_messages' => 0,
-			);
+		// Looks like we need to reseek!
+
+		// Inbox "label"
 		$context['labels'][-1] = array(
 			'id' => -1,
 			'name' => $txt['pm_msg_label_inbox'],
@@ -178,6 +100,61 @@ function MessageMain()
 			'unread_messages' => 0,
 		);
 
+		// First get the inbox counts
+		// The CASE WHEN here is because is_read is set to 3 when you reply to a message
+		$result = $smcFunc['db_query']('', '
+			SELECT COUNT(*) AS total, SUM(is_read & 1) AS num_read
+			FROM {db_prefix}pm_recipients
+			WHERE id_member = {int:current_member}
+				AND in_inbox = {int:in_inbox}
+				AND deleted = {int:not_deleted}',
+			array(
+				'current_member' => $user_info['id'],
+				'in_inbox' => 1,
+				'not_deleted' => 0,
+			)
+		);
+
+		while ($row = $smcFunc['db_fetch_assoc']($result))
+		{
+			$context['labels'][-1]['messages'] = $row['total'];
+			$context['labels'][-1]['unread_messages'] = $row['total'] - $row['num_read'];
+		}
+
+		$smcFunc['db_free_result']($result);
+
+		// Now load info about all the other labels
+		$result = $smcFunc['db_query']('', '
+			SELECT l.id_label, l.name, COALESCE(SUM(pr.is_read & 1), 0) AS num_read, COALESCE(COUNT(pr.id_pm), 0) AS total
+			FROM {db_prefix}pm_labels AS l
+				LEFT JOIN {db_prefix}pm_labeled_messages AS pl ON (pl.id_label = l.id_label)
+				LEFT JOIN {db_prefix}pm_recipients AS pr ON (pr.id_pm = pl.id_pm)
+			WHERE l.id_member = {int:current_member}
+			GROUP BY l.id_label, l.name',
+			array(
+				'current_member' => $user_info['id'],
+			)
+		);
+
+		while ($row = $smcFunc['db_fetch_assoc']($result))
+		{
+			$context['labels'][$row['id_label']] = array(
+				'id' => $row['id_label'],
+				'name' => $row['name'],
+				'messages' => $row['total'],
+				'unread_messages' => $row['total'] - $row['num_read']
+			);
+		}
+
+		$smcFunc['db_free_result']($result);
+
+		// Store it please!
+		cache_put_data('labelCounts:' . $user_info['id'], $context['labels'], 720);
+	}
+
+	// Now we have the labels, and assuming we have unsorted mail, apply our rules!
+	if ($user_settings['new_pm'])
+	{
 		ApplyRules();
 		updateMemberData($user_info['id'], array('new_pm' => 0));
 		$smcFunc['db_query']('', '
@@ -191,63 +168,22 @@ function MessageMain()
 		);
 	}
 
-	// Load the label data.
-	if ($user_settings['new_pm'] || ($context['labels'] = cache_get_data('labelCounts:' . $user_info['id'], 720)) === null)
-	{
-		$context['labels'] = $user_settings['message_labels'] == '' ? array() : explode(',', $user_settings['message_labels']);
-		foreach ($context['labels'] as $id_label => $label_name)
-			$context['labels'][(int) $id_label] = array(
-				'id' => $id_label,
-				'name' => trim($label_name),
-				'messages' => 0,
-				'unread_messages' => 0,
-			);
-		$context['labels'][-1] = array(
-			'id' => -1,
-			'name' => $txt['pm_msg_label_inbox'],
-			'messages' => 0,
-			'unread_messages' => 0,
-		);
-
-		// Looks like we need to reseek!
-		$result = $smcFunc['db_query']('', '
-			SELECT labels, is_read, COUNT(*) AS num
-			FROM {db_prefix}pm_recipients
-			WHERE id_member = {int:current_member}
-				AND deleted = {int:not_deleted}
-			GROUP BY labels, is_read',
-			array(
-				'current_member' => $user_info['id'],
-				'not_deleted' => 0,
-			)
-		);
-		while ($row = $smcFunc['db_fetch_assoc']($result))
-		{
-			$this_labels = explode(',', $row['labels']);
-			foreach ($this_labels as $this_label)
-			{
-				$context['labels'][(int) $this_label]['messages'] += $row['num'];
-				if (!($row['is_read'] & 1))
-					$context['labels'][(int) $this_label]['unread_messages'] += $row['num'];
-			}
-		}
-		$smcFunc['db_free_result']($result);
-
-		// Store it please!
-		cache_put_data('labelCounts:' . $user_info['id'], $context['labels'], 720);
-	}
-
 	// This determines if we have more labels than just the standard inbox.
 	$context['currently_using_labels'] = count($context['labels']) > 1 ? 1 : 0;
 
 	// Some stuff for the labels...
-	$context['current_label_id'] = isset($_REQUEST['l']) && isset($context['labels'][(int) $_REQUEST['l']]) ? (int) $_REQUEST['l'] : -1;
-	$context['current_label'] = &$context['labels'][(int) $context['current_label_id']]['name'];
+	$context['current_label_id'] = isset($_REQUEST['l']) && isset($context['labels'][$_REQUEST['l']]) ? (int) $_REQUEST['l'] : -1;
+	$context['current_label'] = &$context['labels'][$context['current_label_id']]['name'];
 	$context['folder'] = !isset($_REQUEST['f']) || $_REQUEST['f'] != 'sent' ? 'inbox' : 'sent';
 
 	// This is convenient.  Do you know how annoying it is to do this every time?!
 	$context['current_label_redirect'] = 'action=pm;f=' . $context['folder'] . (isset($_GET['start']) ? ';start=' . $_GET['start'] : '') . (isset($_REQUEST['l']) ? ';l=' . $_REQUEST['l'] : '');
-	$context['can_issue_warning'] = in_array('w', $context['admin_features']) && allowedTo('issue_warning') && $modSettings['warning_settings'][0] == 1;
+	$context['can_issue_warning'] = allowedTo('issue_warning') && $modSettings['warning_settings'][0] == 1;
+	$context['can_moderate_forum'] = allowedTo('moderate_forum');
+
+	// Are PM drafts enabled?
+	$context['drafts_pm_save'] = !empty($modSettings['drafts_pm_enabled']) && allowedTo('pm_draft');
+	$context['drafts_autosave'] = !empty($context['drafts_pm_save']) && !empty($modSettings['drafts_autosave_enabled']) && !empty($options['drafts_autosave_enabled']);
 
 	// Build the linktree for all the actions...
 	$context['linktree'][] = array(
@@ -256,15 +192,14 @@ function MessageMain()
 	);
 
 	// Preferences...
-	$context['display_mode'] = WIRELESS ? 0 : $user_settings['pm_prefs'] & 3;
+	$context['display_mode'] = $user_settings['pm_prefs'] & 3;
 
 	$subActions = array(
-		'addbuddy' => 'WirelessAddBuddy',
+		'popup' => 'MessagePopup',
 		'manlabels' => 'ManageLabels',
 		'manrules' => 'ManageRules',
 		'pmactions' => 'MessageActionsApply',
 		'prune' => 'MessagePrune',
-		'removeall' => 'MessageKillAllQuery',
 		'removeall2' => 'MessageKillAll',
 		'report' => 'ReportMessage',
 		'search' => 'MessageSearch',
@@ -272,6 +207,7 @@ function MessageMain()
 		'send' => 'MessagePost',
 		'send2' => 'MessagePost2',
 		'settings' => 'MessageSettings',
+		'showpmdrafts' => 'MessageDrafts',
 	);
 
 	if (!isset($_REQUEST['sa']) || !isset($subActions[$_REQUEST['sa']]))
@@ -281,38 +217,56 @@ function MessageMain()
 	}
 	else
 	{
-		messageIndexBar($_REQUEST['sa']);
-		$subActions[$_REQUEST['sa']]();
+		if (!isset($_REQUEST['xml']) && $_REQUEST['sa'] != 'popup')
+			messageIndexBar($_REQUEST['sa']);
+
+		call_helper($subActions[$_REQUEST['sa']]);
 	}
 }
 
-// A sidebar to easily access different areas of the section
+/**
+ * A menu to easily access different areas of the PM section
+ *
+ * @param string $area The area we're currently in
+ */
 function messageIndexBar($area)
 {
-	global $txt, $context, $scripturl, $sourcedir, $sc, $modSettings, $settings, $user_info, $options;
+	global $txt, $context, $scripturl, $sourcedir, $modSettings, $user_info;
 
 	$pm_areas = array(
 		'folders' => array(
 			'title' => $txt['pm_messages'],
 			'areas' => array(
-				'send' => array(
-					'label' => $txt['new_message'],
-					'custom_url' => $scripturl . '?action=pm;sa=send',
-					'permission' => allowedTo('pm_send'),
-				),
 				'inbox' => array(
 					'label' => $txt['inbox'],
 					'custom_url' => $scripturl . '?action=pm',
+					'amt' => 0,
+				),
+				'send' => array(
+					'label' => $txt['new_message'],
+					'custom_url' => $scripturl . '?action=pm;sa=send',
+					'permission' => 'pm_send',
+					'amt' => 0,
 				),
 				'sent' => array(
 					'label' => $txt['sent_items'],
 					'custom_url' => $scripturl . '?action=pm;f=sent',
+					'amt' => 0,
+				),
+				'drafts' => array(
+					'label' => $txt['drafts_show'],
+					'custom_url' => $scripturl . '?action=pm;sa=showpmdrafts',
+					'permission' => 'pm_draft',
+					'enabled' => !empty($modSettings['drafts_pm_enabled']),
+					'amt' => 0,
 				),
 			),
+			'amt' => 0,
 		),
 		'labels' => array(
 			'title' => $txt['pm_labels'],
 			'areas' => array(),
+			'amt' => 0,
 		),
 		'actions' => array(
 			'title' => $txt['pm_actions'],
@@ -352,34 +306,32 @@ function messageIndexBar($area)
 	else
 	{
 		// Note we send labels by id as it will have less problems in the querystring.
-		$unread_in_labels = 0;
 		foreach ($context['labels'] as $label)
 		{
 			if ($label['id'] == -1)
 				continue;
 
 			// Count the amount of unread items in labels.
-			$unread_in_labels += $label['unread_messages'];
+			$pm_areas['labels']['amt'] += $label['unread_messages'];
 
 			// Add the label to the menu.
 			$pm_areas['labels']['areas']['label' . $label['id']] = array(
-				'label' => $label['name'] . (!empty($label['unread_messages']) ? ' (<strong>' . $label['unread_messages'] . '</strong>)' : ''),
+				'label' => $label['name'],
 				'custom_url' => $scripturl . '?action=pm;l=' . $label['id'],
+				'amt' => $label['unread_messages'],
 				'unread_messages' => $label['unread_messages'],
 				'messages' => $label['messages'],
+				'icon' => 'folder',
 			);
 		}
-
-		if (!empty($unread_in_labels))
-			$pm_areas['labels']['title'] .= ' (' . $unread_in_labels . ')';
 	}
 
 	$pm_areas['folders']['areas']['inbox']['unread_messages'] = &$context['labels'][-1]['unread_messages'];
 	$pm_areas['folders']['areas']['inbox']['messages'] = &$context['labels'][-1]['messages'];
 	if (!empty($context['labels'][-1]['unread_messages']))
 	{
-		$pm_areas['folders']['areas']['inbox']['label'] .= ' (<strong>' . $context['labels'][-1]['unread_messages'] . '</strong>)';
-		$pm_areas['folders']['title'] .= ' (' . $context['labels'][-1]['unread_messages'] . ')';
+		$pm_areas['folders']['areas']['inbox']['amt'] = $context['labels'][-1]['unread_messages'];
+		$pm_areas['folders']['amt'] = $context['labels'][-1]['unread_messages'];
 	}
 
 	// Do we have a limit on the amount of messages we can keep?
@@ -398,38 +350,120 @@ function messageIndexBar($area)
 
 	require_once($sourcedir . '/Subs-Menu.php');
 
-	// What page is this, again?
-	$current_page = $scripturl . '?action=pm' . (!empty($_REQUEST['sa']) ? ';sa=' . $_REQUEST['sa'] : '') . (!empty($context['folder']) ? ';f=' . $context['folder'] : '') . (!empty($context['current_label_id']) ? ';l=' . $context['current_label_id'] : '');
-
 	// Set a few options for the menu.
 	$menuOptions = array(
 		'current_area' => $area,
 		'disable_url_session_check' => true,
-		'toggle_url' => $current_page . ';togglebar',
-		'toggle_redirect_url' => $current_page,
 	);
 
 	// Actually create the menu!
 	$pm_include_data = createMenu($pm_areas, $menuOptions);
 	unset($pm_areas);
 
+	// No menu means no access.
+	if (!$pm_include_data && (!$user_info['is_guest'] || validateSession()))
+		fatal_lang_error('no_access', false);
+
 	// Make a note of the Unique ID for this menu.
 	$context['pm_menu_id'] = $context['max_menu_id'];
 	$context['pm_menu_name'] = 'menu_data_' . $context['pm_menu_id'];
 
 	// Set the selected item.
-	$context['menu_item_selected'] = $pm_include_data['current_area'];
+	$current_area = $pm_include_data['current_area'];
+	$context['menu_item_selected'] = $current_area;
 
-	// obExit will know what to do!
-	if (!WIRELESS)
+	// Set the template for this area and add the profile layer.
+	if (!isset($_REQUEST['xml']))
 		$context['template_layers'][] = 'pm';
 }
 
-// A folder, ie. inbox/sent etc.
+/**
+ * The popup for when we ask for the popup from the user.
+ */
+function MessagePopup()
+{
+	global $context, $modSettings, $smcFunc, $memberContext, $scripturl, $user_settings, $db_show_debug;
+
+	// We do not want to output debug information here.
+	$db_show_debug = false;
+
+	// We only want to output our little layer here.
+	$context['template_layers'] = array();
+	$context['sub_template'] = 'pm_popup';
+
+	$context['can_send_pm'] = allowedTo('pm_send');
+	$context['can_draft'] = allowedTo('pm_draft') && !empty($modSettings['drafts_pm_enabled']);
+
+	// So are we loading stuff?
+	$request = $smcFunc['db_query']('', '
+		SELECT id_pm
+		FROM {db_prefix}pm_recipients AS pmr
+		WHERE pmr.id_member = {int:current_member}
+			AND is_read = {int:not_read}
+			AND deleted = {int:not_deleted}
+		ORDER BY id_pm',
+		array(
+			'current_member' => $context['user']['id'],
+			'not_read' => 0,
+			'not_deleted' => 0,
+		)
+	);
+	$pms = array();
+	while ($row = $smcFunc['db_fetch_row']($request))
+		$pms[] = $row[0];
+	$smcFunc['db_free_result']($request);
+
+	if (!empty($pms))
+	{
+		// Just quickly, it's possible that the number of PMs can get out of sync.
+		$count_unread = count($pms);
+		if ($count_unread != $user_settings['unread_messages'])
+		{
+			updateMemberData($context['user']['id'], array('unread_messages' => $count_unread));
+			$context['user']['unread_messages'] = count($pms);
+		}
+
+		// Now, actually fetch me some PMs. Make sure we track the senders, got some work to do for them.
+		$senders = array();
+
+		$request = $smcFunc['db_query']('', '
+			SELECT pm.id_pm, pm.id_pm_head, COALESCE(mem.id_member, pm.id_member_from) AS id_member_from,
+				COALESCE(mem.real_name, pm.from_name) AS member_from, pm.msgtime AS timestamp, pm.subject
+			FROM {db_prefix}personal_messages AS pm
+				LEFT JOIN {db_prefix}members AS mem ON (pm.id_member_from = mem.id_member)
+			WHERE pm.id_pm IN ({array_int:id_pms})',
+			array(
+				'id_pms' => $pms,
+			)
+		);
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+		{
+			if (!empty($row['id_member_from']))
+				$senders[] = $row['id_member_from'];
+
+			$row['replied_to_you'] = $row['id_pm'] != $row['id_pm_head'];
+			$row['time'] = timeformat($row['timestamp']);
+			$row['pm_link'] = '<a href="' . $scripturl . '?action=pm;f=inbox;pmsg=' . $row['id_pm'] . '">' . $row['subject'] . '</a>';
+			$context['unread_pms'][$row['id_pm']] = $row;
+		}
+		$smcFunc['db_free_result']($request);
+
+		$senders = loadMemberData($senders);
+		foreach ($senders as $member)
+			loadMemberContext($member);
+
+		// Having loaded everyone, attach them to the PMs.
+		foreach ($context['unread_pms'] as $id_pm => $details)
+			if (!empty($memberContext[$details['id_member_from']]))
+				$context['unread_pms'][$id_pm]['member'] = &$memberContext[$details['id_member_from']];
+	}
+}
+
+/**
+ * A folder, ie. inbox/sent etc.
+ */
 function MessageFolder()
 {
-	global $txt, $scripturl, $modSettings, $context, $subjects_request;
-	global $messages_request, $user_info, $recipients, $options, $smcFunc, $memberContext, $user_settings;
 	//
 	// PM ATTACHMENTS MOD MessageFolder global...
 	//
@@ -437,6 +471,8 @@ function MessageFolder()
 	//
 	// PM ATTACHMENTS MOD END!!
 	//
+	global $txt, $scripturl, $modSettings, $context, $subjects_request;
+	global $messages_request, $user_info, $recipients, $options, $smcFunc, $user_settings;
 
 	// Changing view?
 	if (isset($_GET['view']))
@@ -457,9 +493,37 @@ function MessageFolder()
 	$context['from_or_to'] = $context['folder'] != 'sent' ? 'from' : 'to';
 	$context['get_pmessage'] = 'prepareMessageContext';
 	$context['signature_enabled'] = substr($modSettings['signature_settings'], 0, 1) == 1;
+	$context['disabled_fields'] = isset($modSettings['disabled_profile_fields']) ? array_flip(explode(',', $modSettings['disabled_profile_fields'])) : array();
 
-	$labelQuery = $context['folder'] != 'sent' ? '
-			AND FIND_IN_SET(' . $context['current_label_id'] . ', pmr.labels) != 0' : '';
+	// Prevent signature images from going outside the box.
+	if ($context['signature_enabled'])
+	{
+		list ($sig_limits, $sig_bbc) = explode(':', $modSettings['signature_settings']);
+		$sig_limits = explode(',', $sig_limits);
+
+		if (!empty($sig_limits[5]) || !empty($sig_limits[6]))
+			addInlineCss('
+	.signature img { ' . (!empty($sig_limits[5]) ? 'max-width: ' . (int) $sig_limits[5] . 'px; ' : '') . (!empty($sig_limits[6]) ? 'max-height: ' . (int) $sig_limits[6] . 'px; ' : '') . '}');
+	}
+
+	$labelJoin = '';
+	$labelQuery = '';
+	$labelQuery2 = '';
+
+	// SMF logic: If you're viewing a label, it's still the inbox
+	if ($context['folder'] == 'inbox' && $context['current_label_id'] == -1)
+	{
+		$labelQuery = '
+			AND pmr.in_inbox = 1';
+	}
+	elseif ($context['folder'] != 'sent')
+	{
+		$labelJoin = '
+			INNER JOIN {db_prefix}pm_labeled_messages AS pl ON (pl.id_pm = pmr.id_pm)';
+
+		$labelQuery2 = '
+			AND pl.id_label = ' . $context['current_label_id'];
+	}
 
 	// Set the index bar correct!
 	messageIndexBar($context['current_label_id'] == -1 ? $context['folder'] : 'label' . $context['current_label_id']);
@@ -467,7 +531,7 @@ function MessageFolder()
 	// Sorting the folder.
 	$sort_methods = array(
 		'date' => 'pm.id_pm',
-		'name' => 'IFNULL(mem.real_name, \'\')',
+		'name' => 'COALESCE(mem.real_name, \'\')',
 		'subject' => 'pm.subject',
 	);
 
@@ -488,10 +552,6 @@ function MessageFolder()
 	}
 
 	$context['sort_direction'] = $descending ? 'down' : 'up';
-
-	// Why would you want access to your sent items if you're not allowed to send anything?
-	if ($context['folder'] == 'sent')
-		isAllowedTo('pm_send');
 
 	// Set the text to resemble the current folder.
 	$pmbox = $context['folder'] != 'sent' ? $txt['inbox'] : $txt['sent_items'];
@@ -527,9 +587,9 @@ function MessageFolder()
 		$request = $smcFunc['db_query']('', '
 			SELECT COUNT(' . ($context['display_mode'] == 2 ? 'DISTINCT pm.id_pm_head' : '*') . ')
 			FROM {db_prefix}pm_recipients AS pmr' . ($context['display_mode'] == 2 ? '
-				INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)' : '') . '
+				INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)' : '') . $labelJoin . '
 			WHERE pmr.id_member = {int:current_member}
-				AND pmr.deleted = {int:not_deleted}' . $labelQuery,
+				AND pmr.deleted = {int:not_deleted}' . $labelQuery . $labelQuery2,
 			array(
 				'current_member' => $user_info['id'],
 				'not_deleted' => 0,
@@ -540,10 +600,11 @@ function MessageFolder()
 
 	// Only show the button if there are messages to delete.
 	$context['show_delete'] = $max_messages > 0;
+	$maxPerPage = empty($modSettings['disableCustomPerPage']) && !empty($options['messages_per_page']) ? $options['messages_per_page'] : $modSettings['defaultMaxMessages'];
 
 	// Start on the last page.
 	if (!is_numeric($_GET['start']) || $_GET['start'] >= $max_messages)
-		$_GET['start'] = ($max_messages - 1) - (($max_messages - 1) % $modSettings['defaultMaxMessages']);
+		$_GET['start'] = ($max_messages - 1) - (($max_messages - 1) % $maxPerPage);
 	elseif ($_GET['start'] < 0)
 		$_GET['start'] = 0;
 
@@ -559,7 +620,7 @@ function MessageFolder()
 		$context['current_pm'] = $pmID;
 
 		// With only one page of PM's we're gonna want page 1.
-		if ($max_messages <= $modSettings['defaultMaxMessages'])
+		if ($max_messages <= $maxPerPage)
 			$_GET['start'] = 0;
 		// If we pass kstart we assume we're in the right place.
 		elseif (!isset($_GET['kstart']))
@@ -581,9 +642,9 @@ function MessageFolder()
 				$request = $smcFunc['db_query']('', '
 					SELECT COUNT(' . ($context['display_mode'] == 2 ? 'DISTINCT pm.id_pm_head' : '*') . ')
 					FROM {db_prefix}pm_recipients AS pmr' . ($context['display_mode'] == 2 ? '
-						INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)' : '') . '
+						INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)' : '') . $labelJoin . '
 					WHERE pmr.id_member = {int:current_member}
-						AND pmr.deleted = {int:not_deleted}' . $labelQuery . '
+						AND pmr.deleted = {int:not_deleted}' . $labelQuery . $labelQuery2 . '
 						AND pmr.id_pm ' . ($descending ? '>' : '<') . ' {int:id_pm}',
 					array(
 						'current_member' => $user_info['id'],
@@ -596,7 +657,7 @@ function MessageFolder()
 			$smcFunc['db_free_result']($request);
 
 			// To stop the page index's being abnormal, start the page on the page the message would normally be located on...
-			$_GET['start'] = $modSettings['defaultMaxMessages'] * (int) ($_GET['start'] / $modSettings['defaultMaxMessages']);
+			$_GET['start'] = $maxPerPage * (int) ($_GET['start'] / $maxPerPage);
 		}
 	}
 
@@ -610,109 +671,63 @@ function MessageFolder()
 	}
 
 	// Set up the page index.
-	$context['page_index'] = constructPageIndex($scripturl . '?action=pm;f=' . $context['folder'] . (isset($_REQUEST['l']) ? ';l=' . (int) $_REQUEST['l'] : '') . ';sort=' . $context['sort_by'] . ($descending ? ';desc' : ''), $_GET['start'], $max_messages, $modSettings['defaultMaxMessages']);
+	$context['page_index'] = constructPageIndex($scripturl . '?action=pm;f=' . $context['folder'] . (isset($_REQUEST['l']) ? ';l=' . (int) $_REQUEST['l'] : '') . ';sort=' . $context['sort_by'] . ($descending ? ';desc' : ''), $_GET['start'], $max_messages, $maxPerPage);
 	$context['start'] = $_GET['start'];
 
-	// Determine the navigation context (especially useful for the wireless template).
+	// Determine the navigation context.
 	$context['links'] = array(
-		'first' => $_GET['start'] >= $modSettings['defaultMaxMessages'] ? $scripturl . '?action=pm;start=0' : '',
-		'prev' => $_GET['start'] >= $modSettings['defaultMaxMessages'] ? $scripturl . '?action=pm;start=' . ($_GET['start'] - $modSettings['defaultMaxMessages']) : '',
-		'next' => $_GET['start'] + $modSettings['defaultMaxMessages'] < $max_messages ? $scripturl . '?action=pm;start=' . ($_GET['start'] + $modSettings['defaultMaxMessages']) : '',
-		'last' => $_GET['start'] + $modSettings['defaultMaxMessages'] < $max_messages ? $scripturl . '?action=pm;start=' . (floor(($max_messages - 1) / $modSettings['defaultMaxMessages']) * $modSettings['defaultMaxMessages']) : '',
+		'first' => $_GET['start'] >= $maxPerPage ? $scripturl . '?action=pm;start=0' : '',
+		'prev' => $_GET['start'] >= $maxPerPage ? $scripturl . '?action=pm;start=' . ($_GET['start'] - $maxPerPage) : '',
+		'next' => $_GET['start'] + $maxPerPage < $max_messages ? $scripturl . '?action=pm;start=' . ($_GET['start'] + $maxPerPage) : '',
+		'last' => $_GET['start'] + $maxPerPage < $max_messages ? $scripturl . '?action=pm;start=' . (floor(($max_messages - 1) / $maxPerPage) * $maxPerPage) : '',
 		'up' => $scripturl,
 	);
 	$context['page_info'] = array(
-		'current_page' => $_GET['start'] / $modSettings['defaultMaxMessages'] + 1,
-		'num_pages' => floor(($max_messages - 1) / $modSettings['defaultMaxMessages']) + 1
+		'current_page' => $_GET['start'] / $maxPerPage + 1,
+		'num_pages' => floor(($max_messages - 1) / $maxPerPage) + 1
 	);
 
 	// First work out what messages we need to see - if grouped is a little trickier...
 	if ($context['display_mode'] == 2)
 	{
-		// On a non-default sort due to PostgreSQL we have to do a harder sort.
-		if ($smcFunc['db_title'] == 'PostgreSQL' && $_GET['sort'] != 'pm.id_pm')
+		if ($context['folder'] != 'sent' && $context['folder'] != 'inbox')
 		{
-			$sub_request = $smcFunc['db_query']('', '
-				SELECT MAX({raw:sort}) AS sort_param, pm.id_pm_head
-				FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? ($context['sort_by'] == 'name' ? '
-					LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)' : '') : '
-					INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm
-						AND pmr.id_member = {int:current_member}
-						AND pmr.deleted = {int:not_deleted}
-						' . $labelQuery . ')') . ($context['sort_by'] == 'name' ? ( '
-					LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:id_member})') : '') . '
-				WHERE ' . ($context['folder'] == 'sent' ? 'pm.id_member_from = {int:current_member}
-					AND pm.deleted_by_sender = {int:not_deleted}' : '1=1') . (empty($pmsg) ? '' : '
-					AND pm.id_pm = {int:id_pm}') . '
-				GROUP BY pm.id_pm_head
-				ORDER BY sort_param' . ($descending ? ' DESC' : ' ASC') . (empty($pmsg) ? '
-				LIMIT ' . $_GET['start'] . ', ' . $modSettings['defaultMaxMessages'] : ''),
-				array(
-					'current_member' => $user_info['id'],
-					'not_deleted' => 0,
-					'id_member' => $context['folder'] == 'sent' ? 'pmr.id_member' : 'pm.id_member_from',
-					'id_pm' => isset($pmsg) ? $pmsg : '0',
-					'sort' => $_GET['sort'],
-				)
-			);
-			$sub_pms = array();
-			while ($row = $smcFunc['db_fetch_assoc']($sub_request))
-				$sub_pms[$row['id_pm_head']] = $row['sort_param'];
+			$labelJoin = '
+				INNER JOIN {db_prefix}pm_labeled_messages AS pl ON (pl.id_pm = pm.id_pm)';
 
-			$smcFunc['db_free_result']($sub_request);
+			$labelQuery = '';
+			$labelQuery2 = '
+				AND pl.id_label = ' . $context['current_label_id'];
+		}
 
-			$request = $smcFunc['db_query']('', '
-				SELECT pm.id_pm AS id_pm, pm.id_pm_head
-				FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? ($context['sort_by'] == 'name' ? '
-					LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)' : '') : '
-					INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm
-						AND pmr.id_member = {int:current_member}
-						AND pmr.deleted = {int:not_deleted}
-						' . $labelQuery . ')') . ($context['sort_by'] == 'name' ? ( '
-					LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:id_member})') : '') . '
-				WHERE ' . (empty($sub_pms) ? '0=1' : 'pm.id_pm IN ({array_int:pm_list})') . '
-				ORDER BY ' . ($_GET['sort'] == 'pm.id_pm' && $context['folder'] != 'sent' ? 'id_pm' : '{raw:sort}') . ($descending ? ' DESC' : ' ASC') . (empty($pmsg) ? '
-				LIMIT ' . $_GET['start'] . ', ' . $modSettings['defaultMaxMessages'] : ''),
-				array(
-					'current_member' => $user_info['id'],
-					'pm_list' => array_keys($sub_pms),
-					'not_deleted' => 0,
-					'sort' => $_GET['sort'],
-					'id_member' => $context['folder'] == 'sent' ? 'pmr.id_member' : 'pm.id_member_from',
-				)
-			);
-		}
-		else
-		{
-			$request = $smcFunc['db_query']('pm_conversation_list', '
-				SELECT MAX(pm.id_pm) AS id_pm, pm.id_pm_head
-				FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? ($context['sort_by'] == 'name' ? '
-					LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)' : '') : '
-					INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm
-						AND pmr.id_member = {int:current_member}
-						AND pmr.deleted = {int:deleted_by}
-						' . $labelQuery . ')') . ($context['sort_by'] == 'name' ? ( '
-					LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:pm_member})') : '') . '
-				WHERE ' . ($context['folder'] == 'sent' ? 'pm.id_member_from = {int:current_member}
-					AND pm.deleted_by_sender = {int:deleted_by}' : '1=1') . (empty($pmsg) ? '' : '
-					AND pm.id_pm = {int:pmsg}') . '
-				GROUP BY pm.id_pm_head
-				ORDER BY ' . ($_GET['sort'] == 'pm.id_pm' && $context['folder'] != 'sent' ? 'id_pm' : '{raw:sort}') . ($descending ? ' DESC' : ' ASC') . (empty($_GET['pmsg']) ? '
-				LIMIT ' . $_GET['start'] . ', ' . $modSettings['defaultMaxMessages'] : ''),
-				array(
-					'current_member' => $user_info['id'],
-					'deleted_by' => 0,
-					'sort' => $_GET['sort'],
-					'pm_member' => $context['folder'] == 'sent' ? 'pmr.id_member' : 'pm.id_member_from',
-					'pmsg' => isset($pmsg) ? (int) $pmsg : 0,
-				)
-			);
-		}
+		$request = $smcFunc['db_query']('', '
+			SELECT MAX(pm.id_pm) AS id_pm, pm.id_pm_head
+			FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? ($context['sort_by'] == 'name' ? '
+				LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)' : '') : '
+				INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm
+					AND pmr.id_member = {int:current_member}
+					AND pmr.deleted = {int:deleted_by}
+					' . $labelQuery . ')') . $labelJoin . ($context['sort_by'] == 'name' ? ('
+				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:pm_member})') : '') . '
+			WHERE ' . ($context['folder'] == 'sent' ? 'pm.id_member_from = {int:current_member}
+				AND pm.deleted_by_sender = {int:deleted_by}' : '1=1') . (empty($pmsg) ? '' : '
+				AND pm.id_pm = {int:pmsg}') . $labelQuery2 . '
+			GROUP BY pm.id_pm_head' . ($_GET['sort'] != 'pm.id_pm' ? ',' . $_GET['sort'] : '') . '
+			ORDER BY ' . ($_GET['sort'] == 'pm.id_pm' ? 'id_pm' : '{raw:sort}') . ($descending ? ' DESC' : ' ASC') . (empty($_GET['pmsg']) ? '
+			LIMIT ' . $_GET['start'] . ', ' . $maxPerPage : ''),
+			array(
+				'current_member' => $user_info['id'],
+				'deleted_by' => 0,
+				'sort' => $_GET['sort'],
+				'pm_member' => $context['folder'] == 'sent' ? 'pmr.id_member' : 'pm.id_member_from',
+				'pmsg' => isset($pmsg) ? (int) $pmsg : 0,
+			)
+		);
 	}
 	// This is kinda simple!
 	else
 	{
-		// !!!SLOW This query uses a filesort. (inbox only.)
+		// @todo SLOW This query uses a filesort. (inbox only.)
 		$request = $smcFunc['db_query']('', '
 			SELECT pm.id_pm, pm.id_pm_head, pm.id_member_from
 			FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? '' . ($context['sort_by'] == 'name' ? '
@@ -720,13 +735,13 @@ function MessageFolder()
 				INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm
 					AND pmr.id_member = {int:current_member}
 					AND pmr.deleted = {int:is_deleted}
-					' . $labelQuery . ')') . ($context['sort_by'] == 'name' ? ( '
+					' . $labelQuery . ')') . $labelJoin . ($context['sort_by'] == 'name' ? ('
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:pm_member})') : '') . '
 			WHERE ' . ($context['folder'] == 'sent' ? 'pm.id_member_from = {int:current_member}
 				AND pm.deleted_by_sender = {int:is_deleted}' : '1=1') . (empty($pmsg) ? '' : '
-				AND pm.id_pm = {int:pmsg}') . '
+				AND pm.id_pm = {int:pmsg}') . $labelQuery2 . '
 			ORDER BY ' . ($_GET['sort'] == 'pm.id_pm' && $context['folder'] != 'sent' ? 'pmr.id_pm' : '{raw:sort}') . ($descending ? ' DESC' : ' ASC') . (empty($pmsg) ? '
-			LIMIT ' . $_GET['start'] . ', ' . $modSettings['defaultMaxMessages'] : ''),
+			LIMIT ' . $_GET['start'] . ', ' . $maxPerPage : ''),
 			array(
 				'current_member' => $user_info['id'],
 				'is_deleted' => 0,
@@ -789,7 +804,7 @@ function MessageFolder()
 					INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)
 				WHERE pm.id_pm_head = {int:id_pm_head}
 					AND ((pm.id_member_from = {int:current_member} AND pm.deleted_by_sender = {int:not_deleted})
-						OR (pmr.id_member = {int:current_member} AND pmr.deleted = {int:not_deleted}))
+					OR (pmr.id_member = {int:current_member} AND pmr.deleted = {int:not_deleted}))
 				ORDER BY pm.id_pm',
 				array(
 					'current_member' => $user_info['id'],
@@ -820,63 +835,63 @@ function MessageFolder()
 		$all_pms = array_merge($pms, $display_pms);
 		$all_pms = array_unique($all_pms);
 
-	//
-	// PM ATTACHMENTS BEGIN...
-	//
+		//
+		// PM ATTACHMENTS BEGIN...
+		//
 
-	$attachments = array();
+		$attachments = array();
 
-	if (!empty($all_pms))
-	{
-		// Fetch attachments.
-		if (!empty($modSettings['pmAttachmentEnable']) && allowedTo('pm_view_attachments'))
+		if (!empty($all_pms))
 		{
-			$request = $smcFunc['db_query']('', '
-				SELECT
-					pa.id_attach, pa.id_folder, pa.id_pm, pa.pm_report, pa.filename, pa.file_hash, IFNULL(pa.size, 0) AS filesize, pa.downloads,
-					pa.width, pa.height' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : ',
-					IFNULL(thumb.id_attach, 0) AS id_thumb, thumb.width AS thumb_width, thumb.height AS thumb_height') . '
-				FROM {db_prefix}pm_attachments AS pa' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : '
-					LEFT JOIN {db_prefix}pm_attachments AS thumb ON (thumb.id_attach = pa.id_thumb)') . '
-				WHERE pa.attachment_type = {int:attachment_type} AND (pa.id_pm IN ({array_int:pm_list}) OR pa.pm_report IN ({array_int:pm_list}))',
-				array(
-					'pm_list' => $all_pms,
-					'attachment_type' => 0,
-				)
-			);
-			$temp = array();
-			while ($row = $smcFunc['db_fetch_assoc']($request))
+			// Fetch attachments.
+			if (!empty($modSettings['pmAttachmentEnable']) && allowedTo('pm_view_attachments'))
 			{
-				$temp[$row['id_attach']] = $row;
-				
-				if (!empty($row['pm_report']))
-					if (!isset($attachments[$row['pm_report']]))
-						$attachments[$row['pm_report']] = array();
+				$request = $smcFunc['db_query']('', '
+					SELECT
+						pa.id_attach, pa.id_folder, pa.id_pm, pa.pm_report, pa.filename, pa.file_hash, COALESCE(pa.size, 0) AS filesize, pa.downloads,
+						pa.width, pa.height' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : ',
+						COALESCE(thumb.id_attach, 0) AS id_thumb, thumb.width AS thumb_width, thumb.height AS thumb_height') . '
+					FROM {db_prefix}pm_attachments AS pa' . (empty($modSettings['pmAttachmentShowImages']) || empty($modSettings['pmAttachmentThumbnails']) ? '' : '
+						LEFT JOIN {db_prefix}pm_attachments AS thumb ON (thumb.id_attach = pa.id_thumb)') . '
+					WHERE pa.attachment_type = {int:attachment_type} AND (pa.id_pm IN ({array_int:pm_list}) OR pa.pm_report IN ({array_int:pm_list}))',
+					array(
+						'pm_list' => $all_pms,
+						'attachment_type' => 0,
+					)
+				);
+				$temp = array();
+				while ($row = $smcFunc['db_fetch_assoc']($request))
+				{
+					$temp[$row['id_attach']] = $row;
+					
+					if (!empty($row['pm_report']))
+						if (!isset($attachments[$row['pm_report']]))
+							$attachments[$row['pm_report']] = array();
 
-				if (!isset($attachments[$row['id_pm']]))
-					$attachments[$row['id_pm']] = array();
+					if (!isset($attachments[$row['id_pm']]))
+						$attachments[$row['id_pm']] = array();
+				}
+				$smcFunc['db_free_result']($request);
+
+				// This is better than sorting it with the query...
+				ksort($temp);
+
+				foreach ($temp as $row) {
+					if (!empty($row['pm_report']))
+						$attachments[$row['pm_report']][] = $row;
+					
+					$attachments[$row['id_pm']][] = $row;
+				}
 			}
-			$smcFunc['db_free_result']($request);
 
-			// This is better than sorting it with the query...
-			ksort($temp);
-
-			foreach ($temp as $row) {
-				if (!empty($row['pm_report']))
-					$attachments[$row['pm_report']][] = $row;
-				
-				$attachments[$row['id_pm']][] = $row;
-			}
 		}
-
-	}
-	//
-	// PM ATTACHMENTS END!!
-	//
+		//
+		// PM ATTACHMENTS END!!
+		//
 
 		// Get recipients (don't include bcc-recipients for your inbox, you're not supposed to know :P).
 		$request = $smcFunc['db_query']('', '
-			SELECT pmr.id_pm, mem_to.id_member AS id_member_to, mem_to.real_name AS to_name, pmr.bcc, pmr.labels, pmr.is_read
+			SELECT pmr.id_pm, mem_to.id_member AS id_member_to, mem_to.real_name AS to_name, pmr.bcc, pmr.in_inbox, pmr.is_read
 			FROM {db_prefix}pm_recipients AS pmr
 				LEFT JOIN {db_prefix}members AS mem_to ON (mem_to.id_member = pmr.id_member)
 			WHERE pmr.id_pm IN ({array_int:pm_list})',
@@ -890,18 +905,40 @@ function MessageFolder()
 		while ($row = $smcFunc['db_fetch_assoc']($request))
 		{
 			if ($context['folder'] == 'sent' || empty($row['bcc']))
+			{
 				$recipients[$row['id_pm']][empty($row['bcc']) ? 'to' : 'bcc'][] = empty($row['id_member_to']) ? $txt['guest_title'] : '<a href="' . $scripturl . '?action=profile;u=' . $row['id_member_to'] . '">' . $row['to_name'] . '</a>';
+
+				$context['folder'] == 'sent' && $context['display_mode'] != 2 ? $context['message_replied'][$row['id_pm']] = $row['is_read'] & 2 : '';
+			}
 
 			if ($row['id_member_to'] == $user_info['id'] && $context['folder'] != 'sent')
 			{
 				$context['message_replied'][$row['id_pm']] = $row['is_read'] & 2;
 				$context['message_unread'][$row['id_pm']] = $row['is_read'] == 0;
 
-				$row['labels'] = $row['labels'] == '' ? array() : explode(',', $row['labels']);
-				foreach ($row['labels'] as $v)
+				// Get the labels for this PM
+				$request2 = $smcFunc['db_query']('', '
+					SELECT id_label
+					FROM {db_prefix}pm_labeled_messages
+					WHERE id_pm = {int:current_pm}',
+					array(
+						'current_pm' => $row['id_pm'],
+					)
+				);
+
+				while ($row2 = $smcFunc['db_fetch_assoc']($request2))
 				{
-					if (isset($context['labels'][(int) $v]))
-						$context['message_labels'][$row['id_pm']][(int) $v] = array('id' => $v, 'name' => $context['labels'][(int) $v]['name']);
+					$l_id = $row2['id_label'];
+					if (isset($context['labels'][$l_id]))
+						$context['message_labels'][$row['id_pm']][$l_id] = array('id' => $l_id, 'name' => $context['labels'][$l_id]['name']);
+				}
+
+				$smcFunc['db_free_result']($request2);
+
+				// Is this in the inbox as well?
+				if ($row['in_inbox'] == 1)
+				{
+					$context['message_labels'][$row['id_pm']][-1] = array('id' => -1, 'name' => $context['labels'][-1]['name']);
 				}
 			}
 		}
@@ -916,9 +953,7 @@ function MessageFolder()
 		}
 
 		// Load any users....
-		$posters = array_unique($posters);
-		if (!empty($posters))
-			loadMemberData($posters);
+		loadMemberData($posters);
 
 		// If we're on grouped/restricted view get a restricted list of messages.
 		if ($context['display_mode'] != 0)
@@ -930,18 +965,24 @@ function MessageFolder()
 
 			// Seperate query for these bits!
 			$subjects_request = $smcFunc['db_query']('', '
-				SELECT pm.id_pm, pm.subject, pm.id_member_from, pm.msgtime, IFNULL(mem.real_name, pm.from_name) AS from_name,
-					IFNULL(mem.id_member, 0) AS not_guest
+				SELECT pm.id_pm, pm.subject, COALESCE(pm.id_member_from, 0) AS id_member_from, pm.msgtime, COALESCE(mem.real_name, pm.from_name) AS from_name,
+					mem.id_member
 				FROM {db_prefix}personal_messages AS pm
 					LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = pm.id_member_from)
 				WHERE pm.id_pm IN ({array_int:pm_list})
 				ORDER BY ' . implode(', ', $orderBy) . '
-				LIMIT ' . count($pms),
+				LIMIT {int:limit}',
 				array(
 					'pm_list' => $pms,
+					'limit' => count($pms),
 				)
 			);
 		}
+
+		$group_by = $context['folder'] == 'sent' ? '
+			GROUP BY pm.id_pm, pm.subject, pm.id_member_from, pm.body, pm.msgtime, pm.from_name' .
+				($context['sort_by'] == 'name' ? ', mem.real_name' : '')
+		: '';
 
 		// Execute the query!
 		$messages_request = $smcFunc['db_query']('', '
@@ -949,22 +990,35 @@ function MessageFolder()
 			FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? '
 				LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)' : '') . ($context['sort_by'] == 'name' ? '
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = {raw:id_member})' : '') . '
-			WHERE pm.id_pm IN ({array_int:display_pms})' . ($context['folder'] == 'sent' ? '
-			GROUP BY pm.id_pm, pm.subject, pm.id_member_from, pm.body, pm.msgtime, pm.from_name' : '') . '
-			ORDER BY ' . ($context['display_mode'] == 2 ? 'pm.id_pm' : $_GET['sort']) . ($descending ? ' DESC' : ' ASC') . '
-			LIMIT ' . count($display_pms),
+			WHERE pm.id_pm IN ({array_int:display_pms})' .
+			$group_by . '
+			ORDER BY ' . ($context['display_mode'] == 2 ? 'pm.id_pm' : '{raw:sort}') . ($descending ? ' DESC' : ' ASC') . '
+			LIMIT {int:limit}',
 			array(
 				'display_pms' => $display_pms,
 				'id_member' => $context['folder'] == 'sent' ? 'pmr.id_member' : 'pm.id_member_from',
+				'limit' => count($display_pms),
+				'sort' => $_GET['sort'],
 			)
 		);
+
+		// Build the conversation button array.
+		if ($context['display_mode'] == 2)
+		{
+			$context['conversation_buttons'] = array(
+				'delete' => array('text' => 'delete_conversation', 'image' => 'delete.png', 'url' => $scripturl . '?action=pm;sa=pmactions;pm_actions[' . $context['current_pm'] . ']=delete;conversation;f=' . $context['folder'] . ';start=' . $context['start'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';' . $context['session_var'] . '=' . $context['session_id'], 'custom' => 'data-confirm="' . $txt['remove_conversation'] . '"', 'class' => 'you_sure'),
+			);
+
+			// Allow mods to add additional buttons here
+			call_integration_hook('integrate_conversation_buttons');
+		}
 	}
 	else
 		$messages_request = false;
 
 	$context['can_send_pm'] = allowedTo('pm_send');
-	if (!WIRELESS)
-		$context['sub_template'] = 'folder';
+	$context['can_send_email'] = allowedTo('moderate_forum');
+	$context['sub_template'] = 'folder';
 	$context['page_title'] = $txt['pm_inbox'];
 
 	// Finally mark the relevant messages as read.
@@ -979,7 +1033,13 @@ function MessageFolder()
 	}
 }
 
-// Get a personal message for the theme.  (used to save memory.)
+/**
+ * Get a personal message for the theme.  (used to save memory.)
+ *
+ * @param string $type The type of message
+ * @param bool $reset Whether to reset the internal pointer
+ * @return bool|array False on failure, otherwise an array of info
+ */
 function prepareMessageContext($type = 'subject', $reset = false)
 {
 	global $txt, $scripturl, $modSettings, $context, $messages_request, $memberContext, $recipients, $smcFunc;
@@ -1005,8 +1065,6 @@ function prepareMessageContext($type = 'subject', $reset = false)
 		$_SESSION['pm_selected'] = array();
 	}
 
-	$context['labels'] = !empty($context['labels']) ? (array) $context['labels'] : array();
-
 	// If we're in non-boring view do something exciting!
 	if ($context['display_mode'] != 0 && $subjects_request && $type == 'subject')
 	{
@@ -1025,15 +1083,15 @@ function prepareMessageContext($type = 'subject', $reset = false)
 			'member' => array(
 				'id' => $subject['id_member_from'],
 				'name' => $subject['from_name'],
-				'link' => $subject['not_guest'] ? '<a href="' . $scripturl . '?action=profile;u=' . $subject['id_member_from'] . '">' . $subject['from_name'] . '</a>' : $subject['from_name'],
+				'link' => ($subject['id_member_from'] != 0) ? '<a href="' . $scripturl . '?action=profile;u=' . $subject['id_member_from'] . '">' . $subject['from_name'] . '</a>' : $subject['from_name'],
 			),
 			'recipients' => &$recipients[$subject['id_pm']],
 			'subject' => $subject['subject'],
 			'time' => timeformat($subject['msgtime']),
-			'timestamp' => forum_time(true, $subject['msgtime']),
+			'timestamp' => $subject['msgtime'],
 			'number_recipients' => count($recipients[$subject['id_pm']]['to']),
 			'labels' => &$context['message_labels'][$subject['id_pm']],
-			'fully_labeled' => (!empty($context['message_labels'][$subject['id_pm']]) ? count($context['message_labels'][$subject['id_pm']]) : 0) == count($context['labels']),
+			'fully_labeled' => count(isset($context['message_labels'][$subject['id_pm']]) ? $context['message_labels'][$subject['id_pm']] : array()) == count($context['labels']),
 			'is_replied_to' => &$context['message_replied'][$subject['id_pm']],
 			'is_unread' => &$context['message_unread'][$subject['id_pm']],
 			'is_selected' => !empty($temp_pm_selected) && in_array($subject['id_pm'], $temp_pm_selected),
@@ -1068,18 +1126,23 @@ function prepareMessageContext($type = 'subject', $reset = false)
 	{
 		$memberContext[$message['id_member_from']]['name'] = $message['from_name'];
 		$memberContext[$message['id_member_from']]['id'] = 0;
+
 		// Sometimes the forum sends messages itself (Warnings are an example) - in this case don't label it from a guest.
-		$memberContext[$message['id_member_from']]['group'] = $message['from_name'] == $context['forum_name'] ? '' : $txt['guest_title'];
+		$memberContext[$message['id_member_from']]['group'] = $message['from_name'] == $context['forum_name_html_safe'] ? '' : $txt['guest_title'];
 		$memberContext[$message['id_member_from']]['link'] = $message['from_name'];
 		$memberContext[$message['id_member_from']]['email'] = '';
-		$memberContext[$message['id_member_from']]['show_email'] = showEmailAddress(true, 0);
+		$memberContext[$message['id_member_from']]['show_email'] = false;
 		$memberContext[$message['id_member_from']]['is_guest'] = true;
 	}
 	else
 	{
-		$memberContext[$message['id_member_from']]['can_view_profile'] = allowedTo('profile_view_any') || ($message['id_member_from'] == $user_info['id'] && allowedTo('profile_view_own'));
+		$memberContext[$message['id_member_from']]['can_view_profile'] = allowedTo('profile_view') || ($message['id_member_from'] == $user_info['id'] && !$user_info['is_guest']);
 		$memberContext[$message['id_member_from']]['can_see_warning'] = !isset($context['disabled_fields']['warning_status']) && $memberContext[$message['id_member_from']]['warning_status'] && ($context['user']['can_mod'] || (!empty($modSettings['warning_show']) && ($modSettings['warning_show'] > 1 || $message['id_member_from'] == $user_info['id'])));
+		// Show the email if it's your own PM
+		$memberContext[$message['id_member_from']]['show_email'] |= $message['id_member_from'] == $user_info['id'];
 	}
+
+	$memberContext[$message['id_member_from']]['show_profile_buttons'] = $modSettings['show_profile_buttons'] && (!empty($memberContext[$message['id_member_from']]['can_view_profile']) || (!empty($memberContext[$message['id_member_from']]['website']['url']) && !isset($context['disabled_fields']['website'])) || $memberContext[$message['id_member_from']]['show_email'] || $context['can_send_pm']);
 
 	// Censor all the important text...
 	censorText($message['body']);
@@ -1091,31 +1154,84 @@ function prepareMessageContext($type = 'subject', $reset = false)
 	// Send the array.
 	$output = array(
 		'attachment' => loadPMAttachmentContext($message['id_pm']),
-		'alternate' => $counter % 2,
 		'id' => $message['id_pm'],
 		'member' => &$memberContext[$message['id_member_from']],
 		'subject' => $message['subject'],
 		'time' => timeformat($message['msgtime']),
-		'timestamp' => forum_time(true, $message['msgtime']),
+		'timestamp' => $message['msgtime'],
 		'counter' => $counter,
 		'body' => $message['body'],
 		'recipients' => &$recipients[$message['id_pm']],
 		'number_recipients' => count($recipients[$message['id_pm']]['to']),
 		'labels' => &$context['message_labels'][$message['id_pm']],
-		'fully_labeled' => (!empty($context['message_labels'][$message['id_pm']]) ? count($context['message_labels'][$message['id_pm']]) : 0) == count($context['labels']),
+		'fully_labeled' => count(isset($context['message_labels'][$message['id_pm']]) ? $context['message_labels'][$message['id_pm']] : array()) == count($context['labels']),
 		'is_replied_to' => &$context['message_replied'][$message['id_pm']],
 		'is_unread' => &$context['message_unread'][$message['id_pm']],
 		'is_selected' => !empty($temp_pm_selected) && in_array($message['id_pm'], $temp_pm_selected),
+		'is_message_author' => $message['id_member_from'] == $user_info['id'],
+		'can_report' => !empty($modSettings['enableReportPM']),
+		'can_see_ip' => allowedTo('moderate_forum') || ($message['id_member_from'] == $user_info['id'] && !empty($user_info['id'])),
 	);
 
 	$counter++;
 
+	// Any custom profile fields?
+	if (!empty($memberContext[$message['id_member_from']]['custom_fields']))
+		foreach ($memberContext[$message['id_member_from']]['custom_fields'] as $custom)
+			$output['custom_fields'][$context['cust_profile_fields_placement'][$custom['placement']]][] = $custom;
+
+	$output['quickbuttons'] = array(
+		'reply_to_all' => array(
+			'label' => $txt['reply_to_all'],
+			'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $output['id'] . ($output['member']['id'] != $user_info['id'] ? ';quote' : '') . ';u=all',
+			'icon' => 'reply_all_button',
+			'show' => $context['can_send_pm'] && !$output['member']['is_guest'] && ($output['number_recipients'] > 1 || $output['member']['id'] == $user_info['id']),
+		),
+		'reply' => array(
+			'label' => $txt['reply'],
+			'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $output['id'] . ';u=' . $output['member']['id'],
+			'icon' => 'reply_button',
+			'show' => $context['can_send_pm'] && !$output['member']['is_guest'] && $output['member']['id'] != $user_info['id'],
+		),
+		'quote' => array(
+			'label' => $txt['quote_action'],
+			'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $output['id'] . ';quote' . ($output['number_recipients'] > 1 || $output['member']['id'] == $user_info['id'] ? ';u=all' : (!$output['member']['is_guest'] ? ';u=' . $output['member']['id'] : '')),
+			'icon' => 'quote',
+			'show' => $context['can_send_pm'],
+		),
+		'delete' => array(
+			'label' => $txt['delete'],
+			'href' => $scripturl . '?action=pm;sa=pmactions;pm_actions%5b' . $output['id'] . '%5D=delete;f=' . $context['folder'] . ';start=' . $context['start'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';' . $context['session_var'] . '=' . $context['session_id'],
+			'javascript' => 'data-confirm="' . JavaScriptEscape($txt['remove_message_question']) . '"',
+			'class' => 'you_sure',
+			'icon' => 'remove_button',
+		),
+		'more' => array(
+			'report' => array(
+				'label' => $txt['pm_report_to_admin'],
+				'href' => $scripturl . '?action=pm;sa=report;l=' . $context['current_label_id'] . ';pmsg=' . $output['id'],
+				'icon' => 'error',
+				'show' => $output['can_report']
+			),
+		),
+		'quickmod' => array(
+			'class' => 'inline_mod_check',
+			'content' => '<input type="checkbox" name="pms[]" id="deletedisplay' . $output['id'] . '" value="' . $output['id'] . '" onclick="document.getElementById(\'deletelisting' . $output['id'] . '\').checked = this.checked;">',
+			'show' => empty($context['display_mode'])
+		)
+	);
+
+	call_integration_hook('integrate_prepare_pm_context', array(&$output, &$message, $counter));
+
 	return $output;
 }
 
+/**
+ * Allows searching through personal messages.
+ */
 function MessageSearch()
 {
-	global $context, $txt, $scripturl, $modSettings, $smcFunc;
+	global $context, $txt, $scripturl, $smcFunc;
 
 	if (isset($_REQUEST['params']))
 	{
@@ -1131,9 +1247,9 @@ function MessageSearch()
 		$context['search_params']['search'] = un_htmlspecialchars($_REQUEST['search']);
 
 	if (isset($context['search_params']['search']))
-		$context['search_params']['search'] = htmlspecialchars($context['search_params']['search']);
+		$context['search_params']['search'] = $smcFunc['htmlspecialchars']($context['search_params']['search']);
 	if (isset($context['search_params']['userspec']))
-		$context['search_params']['userspec'] = htmlspecialchars($context['search_params']['userspec']);
+		$context['search_params']['userspec'] = $smcFunc['htmlspecialchars']($context['search_params']['userspec']);
 
 	if (!empty($context['search_params']['searchtype']))
 		$context['search_params']['searchtype'] = 2;
@@ -1176,7 +1292,6 @@ function MessageSearch()
 		}
 	}
 
-	$context['simple_search'] = isset($context['search_params']['advanced']) ? empty($context['search_params']['advanced']) : !empty($modSettings['simpleSearch']) && !isset($_REQUEST['advanced']);
 	$context['page_title'] = $txt['pm_search_title'];
 	$context['sub_template'] = 'search';
 	$context['linktree'][] = array(
@@ -1185,6 +1300,9 @@ function MessageSearch()
 	);
 }
 
+/**
+ * Actually do the search of personal messages.
+ */
 function MessageSearch2()
 {
 	global $scripturl, $modSettings, $user_info, $context, $txt;
@@ -1193,7 +1311,10 @@ function MessageSearch2()
 	if (!empty($context['load_average']) && !empty($modSettings['loadavg_search']) && $context['load_average'] >= $modSettings['loadavg_search'])
 		fatal_lang_error('loadavg_search_disabled', false);
 
-	// !!! For the moment force the folder to the inbox.
+	/**
+	 * @todo For the moment force the folder to the inbox.
+	 * @todo Maybe set the inbox based on a cookie or theme setting?
+	 */
 	$context['folder'] = 'inbox';
 
 	// Some useful general permissions.
@@ -1275,7 +1396,7 @@ function MessageSearch2()
 			}
 
 			// Who matches those criteria?
-			// !!! This doesn't support sent item searching.
+			// @todo This doesn't support sent item searching.
 			$request = $smcFunc['db_query']('', '
 				SELECT id_member
 				FROM {db_prefix}members
@@ -1288,20 +1409,19 @@ function MessageSearch2()
 				$userQuery = '';
 			elseif ($smcFunc['db_num_rows']($request) == 0)
 			{
-				$where_params['real_name'] = 'pm.from_name';
-				$searchq_parameters = array_merge($searchq_parameters, $where_params);
-				$userQuery = 'AND pm.id_member_from = 0 AND (' . implode(' OR ', $where_clause) . ')';
+				$userQuery = 'AND pm.id_member_from = 0 AND ({raw:pm_from_name} LIKE {raw:guest_user_name_implode})';
+				$searchq_parameters['guest_user_name_implode'] = '\'' . implode('\' OR ' . ($smcFunc['db_case_sensitive'] ? 'LOWER(pm.from_name)' : 'pm.from_name') . ' LIKE \'', $possible_users) . '\'';
+				$searchq_parameters['pm_from_name'] = $smcFunc['db_case_sensitive'] ? 'LOWER(pm.from_name)' : 'pm.from_name';
 			}
 			else
 			{
 				$memberlist = array();
 				while ($row = $smcFunc['db_fetch_assoc']($request))
 					$memberlist[] = $row['id_member'];
-
-				$where_params['real_name'] = 'pm.from_name';
-				$searchq_parameters = array_merge($searchq_parameters, $where_params);
+				$userQuery = 'AND (pm.id_member_from IN ({array_int:member_list}) OR (pm.id_member_from = 0 AND ({raw:pm_from_name} LIKE {raw:guest_user_name_implode})))';
+				$searchq_parameters['guest_user_name_implode'] = '\'' . implode('\' OR ' . ($smcFunc['db_case_sensitive'] ? 'LOWER(pm.from_name)' : 'pm.from_name') . ' LIKE \'', $possible_users) . '\'';
 				$searchq_parameters['member_list'] = $memberlist;
-				$userQuery = 'AND (pm.id_member_from IN ({array_int:member_list}) OR (pm.id_member_from = 0 AND (' . implode(' OR ', $where_clause) . ')))';
+				$searchq_parameters['pm_from_name'] = $smcFunc['db_case_sensitive'] ? 'LOWER(pm.from_name)' : 'pm.from_name';
 			}
 			$smcFunc['db_free_result']($request);
 		}
@@ -1310,7 +1430,7 @@ function MessageSearch2()
 	}
 
 	// Setup the sorting variables...
-	// !!! Add more in here!
+	// @todo Add more in here!
 	$sort_columns = array(
 		'pm.id_pm',
 	);
@@ -1320,7 +1440,9 @@ function MessageSearch2()
 	$search_params['sort_dir'] = !empty($search_params['sort_dir']) && $search_params['sort_dir'] == 'asc' ? 'asc' : 'desc';
 
 	// Sort out any labels we may be searching by.
+	$context['search_in'] = array();
 	$labelQuery = '';
+	$labelJoin = '';
 	if ($context['folder'] == 'inbox' && !empty($search_params['advanced']) && $context['currently_using_labels'])
 	{
 		// Came here from pagination?  Put them back into $_REQUEST for sanitization.
@@ -1345,18 +1467,45 @@ function MessageSearch2()
 		// Otherwise prepare the query!
 		elseif (count($_REQUEST['searchlabel']) != count($context['labels']))
 		{
-			$labelQuery = '
-			AND {raw:label_implode}';
+			// Special case here... "inbox" isn't a real label anymore...
+			if (in_array(-1, $_REQUEST['searchlabel']))
+			{
+				$context['search_in'][] = $context['labels'][-1]['name'];
 
-			$labelStatements = array();
-			foreach ($_REQUEST['searchlabel'] as $label)
-				$labelStatements[] = $smcFunc['db_quote']('FIND_IN_SET({string:label}, pmr.labels) != 0', array(
-					'label' => $label,
-				));
+				$labelQuery = '	AND pmr.in_inbox = {int:in_inbox}';
+				$searchq_parameters['in_inbox'] = 1;
 
-			$searchq_parameters['label_implode'] = '(' . implode(' OR ', $labelStatements) . ')';
+				// Now we get rid of that...
+				$temp = array_diff($_REQUEST['searchlabel'], array(-1));
+				$_REQUEST['searchlabel'] = $temp;
+			}
+
+			// Still have something?
+			if (!empty($_REQUEST['searchlabel']))
+			{
+				if ($labelQuery == '')
+				{
+					// Not searching the inbox - PM must be labeled
+					$labelQuery = ' AND pml.id_label IN ({array_int:labels})';
+					$labelJoin = ' INNER JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_pm = pmr.id_pm)';
+				}
+				else
+				{
+					// Searching the inbox - PM doesn't have to be labeled
+					$labelQuery = ' AND (' . substr($labelQuery, 5) . ' OR pml.id_label IN ({array_int:labels}))';
+					$labelJoin = ' LEFT JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_pm = pmr.id_pm)';
+				}
+
+				$searchq_parameters['labels'] = $_REQUEST['searchlabel'];
+
+				foreach ($_REQUEST['searchlabel'] as $label_key)
+					$context['search_in'][] = $context['labels'][$label_key]['name'];
+			}
 		}
 	}
+
+	if (empty($context['search_in']))
+		$context['search_in'][] = $context['folder'];
 
 	// What are we actually searching for?
 	$search_params['search'] = !empty($search_params['search']) ? $search_params['search'] : (isset($_REQUEST['search']) ? $_REQUEST['search'] : '');
@@ -1386,13 +1535,15 @@ function MessageSearch2()
 
 	// Now we look for -test, etc.... normaller.
 	foreach ($tempSearch as $index => $word)
+	{
 		if (strpos(trim($word), '-') === 0)
 		{
-			$word = substr($smcFunc['strtolower'](trim($word)), 1);
+			$word = substr($smcFunc['strtolower']($word), 1);
 			if (strlen($word) > 0)
 				$excludedWords[] = $word;
 			unset($tempSearch[$index]);
 		}
+	}
 
 	$searchArray = array_merge($searchArray, $tempSearch);
 
@@ -1425,9 +1576,9 @@ function MessageSearch2()
 	// Sort out the search query so the user can edit it - if they want.
 	$context['search_params'] = $search_params;
 	if (isset($context['search_params']['search']))
-		$context['search_params']['search'] = htmlspecialchars($context['search_params']['search']);
+		$context['search_params']['search'] = $smcFunc['htmlspecialchars']($context['search_params']['search']);
 	if (isset($context['search_params']['userspec']))
-		$context['search_params']['userspec'] = htmlspecialchars($context['search_params']['userspec']);
+		$context['search_params']['userspec'] = $smcFunc['htmlspecialchars']($context['search_params']['userspec']);
 
 	// Now we have all the parameters, combine them together for pagination and the like...
 	$context['params'] = array();
@@ -1473,6 +1624,7 @@ function MessageSearch2()
 		SELECT COUNT(*)
 		FROM {db_prefix}pm_recipients AS pmr
 			INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)
+			' . $labelJoin . '
 		WHERE ' . ($context['folder'] == 'inbox' ? '
 			pmr.id_member = {int:current_member}
 			AND pmr.deleted = {int:not_deleted}' : '
@@ -1489,11 +1641,12 @@ function MessageSearch2()
 	$smcFunc['db_free_result']($request);
 
 	// Get all the matching messages... using standard search only (No caching and the like!)
-	// !!! This doesn't support sent item searching yet.
+	// @todo This doesn't support sent item searching yet.
 	$request = $smcFunc['db_query']('', '
 		SELECT pm.id_pm, pm.id_pm_head, pm.id_member_from
 		FROM {db_prefix}pm_recipients AS pmr
 			INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)
+			' . $labelJoin . '
 		WHERE ' . ($context['folder'] == 'inbox' ? '
 			pmr.id_member = {int:current_member}
 			AND pmr.deleted = {int:not_deleted}' : '
@@ -1501,11 +1654,15 @@ function MessageSearch2()
 			AND pm.deleted_by_sender = {int:not_deleted}') . '
 			' . $userQuery . $labelQuery . $timeQuery . '
 			AND (' . $searchQuery . ')
-		ORDER BY ' . $search_params['sort'] . ' ' . $search_params['sort_dir'] . '
-		LIMIT ' . $context['start'] . ', ' . $modSettings['search_results_per_page'],
+		ORDER BY {raw:sort} {raw:sort_dir}
+		LIMIT {int:start}, {int:max}',
 		array_merge($searchq_parameters, array(
 			'current_member' => $user_info['id'],
 			'not_deleted' => 0,
+			'sort' => $search_params['sort'],
+			'sort_dir' => $search_params['sort_dir'],
+			'start' => $context['start'],
+			'max' => $modSettings['search_results_per_page'],
 		))
 	);
 	$foundMessages = array();
@@ -1545,12 +1702,12 @@ function MessageSearch2()
 	}
 
 	// Load the users...
-	$posters = array_unique($posters);
-	if (!empty($posters))
-		loadMemberData($posters);
+	loadMemberData($posters);
 
 	// Sort out the page index.
 	$context['page_index'] = constructPageIndex($scripturl . '?action=pm;sa=search2;params=' . $context['params'], $_GET['start'], $numResults, $modSettings['search_results_per_page'], false);
+
+	$context['num_results'] = $numResults;
 
 	$context['message_labels'] = array();
 	$context['message_replied'] = array();
@@ -1562,7 +1719,7 @@ function MessageSearch2()
 		$request = $smcFunc['db_query']('', '
 			SELECT
 				pmr.id_pm, mem_to.id_member AS id_member_to, mem_to.real_name AS to_name,
-				pmr.bcc, pmr.labels, pmr.is_read
+				pmr.bcc, pmr.in_inbox, pmr.is_read
 			FROM {db_prefix}pm_recipients AS pmr
 				LEFT JOIN {db_prefix}members AS mem_to ON (mem_to.id_member = pmr.id_member)
 			WHERE pmr.id_pm IN ({array_int:message_list})',
@@ -1579,17 +1736,38 @@ function MessageSearch2()
 			{
 				$context['message_replied'][$row['id_pm']] = $row['is_read'] & 2;
 
-				$row['labels'] = $row['labels'] == '' ? array() : explode(',', $row['labels']);
-				// This is a special need for linking to messages.
-				foreach ($row['labels'] as $v)
+				$row['labels'] = '';
+
+				// Get the labels for this PM
+				$request2 = $smcFunc['db_query']('', '
+					SELECT id_label
+					FROM {db_prefix}pm_labeled_messages
+					WHERE id_pm = {int:current_pm}',
+					array(
+						'current_pm' => $row['id_pm'],
+					)
+				);
+
+				while ($row2 = $smcFunc['db_fetch_assoc']($request2))
 				{
-					if (isset($context['labels'][(int) $v]))
-						$context['message_labels'][$row['id_pm']][(int) $v] = array('id' => $v, 'name' => $context['labels'][(int) $v]['name']);
+					$l_id = $row2['id_label'];
+					if (isset($context['labels'][$l_id]))
+						$context['message_labels'][$row['id_pm']][$l_id] = array('id' => $l_id, 'name' => $context['labels'][$l_id]['name']);
 
 					// Here we find the first label on a message - for linking to posts in results
-					if (!isset($context['first_label'][$row['id_pm']]) && !in_array('-1', $row['labels']))
-						$context['first_label'][$row['id_pm']] = (int) $v;
+					if (!isset($context['first_label'][$row['id_pm']]) && $row['in_inbox'] != 1)
+						$context['first_label'][$row['id_pm']] = $l_id;
 				}
+
+				$smcFunc['db_free_result']($request2);
+
+				// Is this in the inbox as well?
+				if ($row['in_inbox'] == 1)
+				{
+					$context['message_labels'][$row['id_pm']][-1] = array('id' => -1, 'name' => $context['labels'][-1]['name']);
+				}
+
+				$row['labels'] = $row['labels'] == '' ? array() : explode(',', $row['labels']);
 			}
 		}
 
@@ -1598,10 +1776,13 @@ function MessageSearch2()
 			SELECT pm.id_pm, pm.subject, pm.id_member_from, pm.body, pm.msgtime, pm.from_name
 			FROM {db_prefix}personal_messages AS pm
 			WHERE pm.id_pm IN ({array_int:message_list})
-			ORDER BY ' . $search_params['sort'] . ' ' . $search_params['sort_dir'] . '
-			LIMIT ' . count($foundMessages),
+			ORDER BY {raw:sort} {raw:sort_dir}
+			LIMIT {int:limit}',
 			array(
 				'message_list' => $foundMessages,
+				'limit' => count($foundMessages),
+				'sort' => $search_params['sort'],
+				'sort_dir' => $search_params['sort_dir'],
 			)
 		);
 		$counter = 0;
@@ -1618,9 +1799,17 @@ function MessageSearch2()
 				$memberContext[$row['id_member_from']]['group'] = $txt['guest_title'];
 				$memberContext[$row['id_member_from']]['link'] = $row['from_name'];
 				$memberContext[$row['id_member_from']]['email'] = '';
-				$memberContext[$row['id_member_from']]['show_email'] = showEmailAddress(true, 0);
 				$memberContext[$row['id_member_from']]['is_guest'] = true;
 			}
+			else
+			{
+				$memberContext[$row['id_member_from']]['can_view_profile'] = allowedTo('profile_view') || ($row['id_member_from'] == $user_info['id'] && !$user_info['is_guest']);
+				$memberContext[$row['id_member_from']]['can_see_warning'] = !isset($context['disabled_fields']['warning_status']) && $memberContext[$row['id_member_from']]['warning_status'] && ($context['user']['can_mod'] || (!empty($modSettings['warning_show']) && ($modSettings['warning_show'] > 1 || $row['id_member_from'] == $user_info['id'])));
+				// Show the email if it's your own PM
+				$memberContext[$row['id_member_from']]['show_email'] |= $row['id_member_from'] == $user_info['id'];
+			}
+
+			$memberContext[$row['id_member_from']]['show_profile_buttons'] = $modSettings['show_profile_buttons'] && (!empty($memberContext[$row['id_member_from']]['can_view_profile']) || (!empty($memberContext[$row['id_member_from']]['website']['url']) && !isset($context['disabled_fields']['website'])) || $memberContext[$row['id_member_from']]['show_email'] || $context['can_send_pm']);
 
 			// Censor anything we don't want to see...
 			censorText($row['body']);
@@ -1643,10 +1832,48 @@ function MessageSearch2()
 				'href' => $href,
 				'link' => '<a href="' . $href . '">' . $row['subject'] . '</a>',
 				'counter' => ++$counter,
+				'can_see_ip' => allowedTo('moderate_forum') || ($row['id_member_from'] == $user_info['id'] && !empty($user_info['id'])),
+				'quickbuttons' => array(
+					'reply_to_all' => array(
+						'label' => $txt['reply_to_all'],
+						'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $row['id_pm'] . ($row['id_member_from'] != $user_info['id'] ? ';quote' : '') . ';u=all',
+						'icon' => 'reply_all_button',
+						'show' => $context['can_send_pm'] && !$memberContext[$row['id_member_from']]['is_guest'] && (count($recipients[$row['id_pm']]['to']) > 1 || $row['id_member_from'] == $user_info['id']),
+					),
+					'reply' => array(
+						'label' => $txt['reply'],
+						'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $row['id_pm'] . ';u=' . $row['id_member_from'],
+						'icon' => 'reply_button',
+						'show' => $context['can_send_pm'] && !$memberContext[$row['id_member_from']]['is_guest'] && $row['id_member_from'] != $user_info['id'],
+					),
+					'quote' => array(
+						'label' => $txt['quote_action'],
+						'href' => $scripturl . '?action=pm;sa=send;f=' . $context['folder'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';pmsg=' . $row['id_pm'] . ';quote' . (count($recipients[$row['id_pm']]['to']) > 1 || $row['id_member_from'] == $user_info['id'] ? ';u=all' : (!$memberContext[$row['id_member_from']]['is_guest'] ? ';u=' . $row['id_member_from'] : '')),
+						'icon' => 'quote',
+						'show' => $context['can_send_pm'],
+					),
+					'delete' => array(
+						'label' => $txt['delete'],
+						'href' => $scripturl . '?action=pm;sa=pmactions;pm_actions%5b' . $row['id_pm'] . '%5D=delete;f=' . $context['folder'] . ';start=' . $context['start'] . ($context['current_label_id'] != -1 ? ';l=' . $context['current_label_id'] : '') . ';' . $context['session_var'] . '=' . $context['session_id'],
+						'javascript' => 'data-confirm="' . JavaScriptEscape($txt['remove_message_question']) . '"',
+						'class' => 'you_sure',
+						'icon' => 'remove_button',
+					),
+					'more' => array(
+						'report' => array(
+							'label' => $txt['pm_report_to_admin'],
+							'href' => $scripturl . '?action=pm;sa=report;l=' . $context['current_label_id'] . ';pmsg=' . $row['id_pm'],
+							'icon' => 'error',
+							'show' => !empty($modSettings['enableReportPM']),
+						),
+					),
+				)
 			);
 		}
 		$smcFunc['db_free_result']($request);
 	}
+
+	call_integration_hook('integrate_search_pm_context');
 
 	// Finish off the context.
 	$context['page_title'] = $txt['pm_search_title'];
@@ -1658,21 +1885,24 @@ function MessageSearch2()
 	);
 }
 
-// Send a new message?
+/**
+ * Send a new message?
+ */
 function MessagePost()
 {
 	global $txt, $sourcedir, $scripturl, $modSettings;
-	global $context, $options, $smcFunc, $language, $user_info;
+	global $context, $smcFunc, $language, $user_info;
 
 	isAllowedTo('pm_send');
 
 	loadLanguage('PersonalMessage');
 	// Just in case it was loaded from somewhere else.
-	if (!WIRELESS)
-	{
-		loadTemplate('PersonalMessage');
-		$context['sub_template'] = 'send';
-	}
+	loadTemplate('PersonalMessage');
+	loadJavaScriptFile('PersonalMessage.js', array('defer' => false, 'minimize' => true), 'smf_pms');
+	loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
+	if ($context['drafts_autosave'])
+		loadJavaScriptFile('drafts.js', array('defer' => false, 'minimize' => true), 'smf_drafts');
+	$context['sub_template'] = 'send';
 
 	// Extract out the spam settings - cause it's neat.
 	list ($modSettings['max_pm_recipients'], $modSettings['pm_posts_verification'], $modSettings['pm_posts_per_hour']) = explode(',', $modSettings['pm_spam_settings']);
@@ -1754,8 +1984,8 @@ function MessagePost()
 		$request = $smcFunc['db_query']('', '
 			SELECT
 				pm.id_pm, CASE WHEN pm.id_pm_head = {int:id_pm_head_empty} THEN pm.id_pm ELSE pm.id_pm_head END AS pm_head,
-				pm.body, pm.subject, pm.msgtime, mem.member_name, IFNULL(mem.id_member, 0) AS id_member,
-				IFNULL(mem.real_name, pm.from_name) AS real_name
+				pm.body, pm.subject, pm.msgtime, mem.member_name, COALESCE(mem.id_member, 0) AS id_member,
+				COALESCE(mem.real_name, pm.from_name) AS real_name
 			FROM {db_prefix}personal_messages AS pm' . (!$isReceived ? '' : '
 				INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = {int:id_pm})') . '
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = pm.id_member_from)
@@ -1797,7 +2027,7 @@ function MessagePost()
 
 		if (isset($_REQUEST['quote']))
 		{
-			// Remove any nested quotes and <br />...
+			// Remove any nested quotes and <br>...
 			$form_message = preg_replace('~<br ?/?' . '>~i', "\n", $row_quoted['body']);
 			if (!empty($modSettings['removeNestedQuotes']))
 				$form_message = preg_replace(array('~\n?\[quote.*?\].+?\[/quote\]\n?~is', '~^\n~', '~\[/quote\]~'), '', $form_message);
@@ -1825,7 +2055,7 @@ function MessagePost()
 			),
 			'subject' => $row_quoted['subject'],
 			'time' => timeformat($row_quoted['msgtime']),
-			'timestamp' => forum_time(true, $row_quoted['msgtime']),
+			'timestamp' => $row_quoted['msgtime'],
 			'body' => $row_quoted['body']
 		);
 	}
@@ -1851,7 +2081,7 @@ function MessagePost()
 			if ($row_quoted['id_member'] != $user_info['id'])
 				$context['recipients']['to'][] = array(
 					'id' => $row_quoted['id_member'],
-					'name' => htmlspecialchars($row_quoted['real_name']),
+					'name' => $smcFunc['htmlspecialchars']($row_quoted['real_name']),
 				);
 
 			// Now to get the others.
@@ -1887,9 +2117,10 @@ function MessagePost()
 				SELECT id_member, real_name
 				FROM {db_prefix}members
 				WHERE id_member IN ({array_int:member_list})
-				LIMIT ' . count($_REQUEST['u']),
+				LIMIT {int:limit}',
 				array(
 					'member_list' => $_REQUEST['u'],
+					'limit' => count($_REQUEST['u']),
 				)
 			);
 			while ($row = $smcFunc['db_fetch_assoc']($request))
@@ -1914,10 +2145,9 @@ function MessagePost()
 	$context['can_post_attachment'] = !empty($modSettings['pmAttachmentEnable']) && $modSettings['pmAttachmentEnable'] == 1 && allowedTo('pm_post_attachments') && $context['num_allowed_attachments'] > 0 ? 1 : 0;
 
 	// Set the defaults...
-	$context['subject'] = $form_subject != '' ? $form_subject : $txt['no_subject'];
+	$context['subject'] = $form_subject;
 	$context['message'] = str_replace(array('"', '<', '>', '&nbsp;'), array('&quot;', '&lt;', '&gt;', ' '), $form_message);
 	$context['post_error'] = array();
-	$context['copy_to_outbox'] = !empty($options['copy_to_outbox']);
 
 	// And build the link tree.
 	$context['linktree'][] = array(
@@ -1925,7 +2155,13 @@ function MessagePost()
 		'name' => $txt['new_message']
 	);
 
-	$modSettings['disable_wysiwyg'] = !empty($modSettings['disable_wysiwyg']) || empty($modSettings['enableBBC']);
+	// Generate a list of drafts that they can load in to the editor
+	if (!empty($context['drafts_pm_save']))
+	{
+		require_once($sourcedir . '/Drafts.php');
+		$pm_seed = isset($_REQUEST['pmsg']) ? $_REQUEST['pmsg'] : (isset($_REQUEST['quote']) ? $_REQUEST['quote'] : 0);
+		ShowDrafts($user_info['id'], $pm_seed, 1);
+	}
 
 	// Needed for the WYSIWYG editor.
 	require_once($sourcedir . '/Subs-Editor.php');
@@ -1939,6 +2175,8 @@ function MessagePost()
 		'labels' => array(
 			'post_button' => $txt['send_message'],
 		),
+		'preview_type' => 2,
+		'required' => true,
 	);
 	create_control_richedit($editorOptions);
 
@@ -1968,24 +2206,55 @@ function MessagePost()
 		$context['visual_verification_id'] = $verificationOptions['id'];
 	}
 
+	call_integration_hook('integrate_pm_post');
+
 	// Register this form and get a sequence number in $context.
 	checkSubmitOnce('register');
 }
 
-// An error in the message...
+/**
+ * This function allows the user to view their PM drafts
+ */
+function MessageDrafts()
+{
+	global $sourcedir, $user_info;
+
+	// validate with loadMemberData()
+	$memberResult = loadMemberData($user_info['id'], false);
+	if (!$memberResult)
+		fatal_lang_error('not_a_user', false);
+	list ($memID) = $memberResult;
+
+	// drafts is where the functions reside
+	require_once($sourcedir . '/Drafts.php');
+	showPMDrafts($memID);
+}
+
+/**
+ * An error in the message...
+ *
+ * @param array $error_types An array of strings indicating which type of errors occurred
+ * @param array $named_recipients
+ * @param $recipient_ids
+ */
 function messagePostError($error_types, $named_recipients, $recipient_ids = array())
 {
 	global $txt, $context, $scripturl, $modSettings;
 	global $smcFunc, $user_info, $sourcedir;
 
-	checkSession('request');
-
-	$context['menu_data_' . $context['pm_menu_id']]['current_area'] = 'send';
-
-	if (!WIRELESS)
+	if (!isset($_REQUEST['xml']))
+	{
+		$context['menu_data_' . $context['pm_menu_id']]['current_area'] = 'send';
 		$context['sub_template'] = 'send';
+		loadJavaScriptFile('PersonalMessage.js', array('defer' => false, 'minimize' => true), 'smf_pms');
+		loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
+	}
+	else
+		$context['sub_template'] = 'pm';
 
 	$context['page_title'] = $txt['send_message'];
+
+	checkSession('request');
 
 	// Got some known members?
 	$context['recipients'] = array(
@@ -2074,13 +2343,16 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 			foreach ($_POST['attach_del'] as $i => $dummy)
 				$del_temp[$i] = (int) $dummy;
 
-			foreach ($context['current_attachments'] as $k => $dummy)
-				if (!in_array($dummy['id'], $del_temp))
-				{
-					$context['current_attachments'][$k]['unchecked'] = true;
-					$deleted_attachments = !isset($deleted_attachments) || is_bool($deleted_attachments) ? 1 : $deleted_attachments + 1;
-					$quantity--;
-				}
+			if (!empty($context['current_attachments']))
+			{
+				foreach ($context['current_attachments'] as $k => $dummy)
+					if (!in_array($dummy['id'], $del_temp))
+					{
+						$context['current_attachments'][$k]['unchecked'] = true;
+						$deleted_attachments = !isset($deleted_attachments) || is_bool($deleted_attachments) ? 1 : $deleted_attachments + 1;
+						$quantity--;
+					}
+			}
 		}
 
 		if (!empty($_FILES['attachment']))
@@ -2157,13 +2429,9 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 	// Set everything up like before....
 	$context['subject'] = isset($_REQUEST['subject']) ? $smcFunc['htmlspecialchars']($_REQUEST['subject']) : '';
 	$context['message'] = isset($_REQUEST['message']) ? str_replace(array('  '), array('&nbsp; '), $smcFunc['htmlspecialchars']($_REQUEST['message'])) : '';
-		
-	$context['num_allowed_attachments'] = empty($modSettings['attachmentNumPerPMLimit']) ? 50 : min($modSettings['attachmentNumPerPMLimit'] - count($context['current_attachments']) + (isset($deleted_attachments) ? $deleted_attachments : 0), $modSettings['attachmentNumPerPMLimit']);		
-
-	$context['can_post_attachment'] = !empty($modSettings['pmAttachmentEnable']) && $modSettings['pmAttachmentEnable'] == 1 && allowedTo('pm_post_attachments') && $context['num_allowed_attachments'] > 0 ? 1 : 0;	
-	
-	$context['copy_to_outbox'] = !empty($_REQUEST['outbox']);
 	$context['reply'] = !empty($_REQUEST['replied_to']);
+	$context['num_allowed_attachments'] = empty($modSettings['attachmentNumPerPMLimit']) ? 50 : min($modSettings['attachmentNumPerPMLimit'] - count($context['current_attachments']) + (isset($deleted_attachments) ? $deleted_attachments : 0), $modSettings['attachmentNumPerPMLimit']);
+	$context['can_post_attachment'] = !empty($modSettings['pmAttachmentEnable']) && $modSettings['pmAttachmentEnable'] == 1 && allowedTo('pm_post_attachments') && $context['num_allowed_attachments'] > 0 ? 1 : 0;	
 
 	if ($context['reply'])
 	{
@@ -2172,8 +2440,8 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 		$request = $smcFunc['db_query']('', '
 			SELECT
 				pm.id_pm, CASE WHEN pm.id_pm_head = {int:no_id_pm_head} THEN pm.id_pm ELSE pm.id_pm_head END AS pm_head,
-				pm.body, pm.subject, pm.msgtime, mem.member_name, IFNULL(mem.id_member, 0) AS id_member,
-				IFNULL(mem.real_name, pm.from_name) AS real_name
+				pm.body, pm.subject, pm.msgtime, mem.member_name, COALESCE(mem.id_member, 0) AS id_member,
+				COALESCE(mem.real_name, pm.from_name) AS real_name
 			FROM {db_prefix}personal_messages AS pm' . ($context['folder'] == 'sent' ? '' : '
 				INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = {int:replied_to})') . '
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = pm.id_member_from)
@@ -2188,7 +2456,12 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 			)
 		);
 		if ($smcFunc['db_num_rows']($request) == 0)
-			fatal_lang_error('pm_not_yours', false);
+		{
+			if (!isset($_REQUEST['xml']))
+				fatal_lang_error('pm_not_yours', false);
+			else
+				$error_types[] = 'pm_not_yours';
+		}
 		$row_quoted = $smcFunc['db_fetch_assoc']($request);
 		$smcFunc['db_free_result']($request);
 
@@ -2207,7 +2480,7 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 			),
 			'subject' => $row_quoted['subject'],
 			'time' => timeformat($row_quoted['msgtime']),
-			'timestamp' => forum_time(true, $row_quoted['msgtime']),
+			'timestamp' => $row_quoted['msgtime'],
 			'body' => parse_bbc($row_quoted['body'], true, 'pm' . $row_quoted['id_pm']),
 		);
 	}
@@ -2220,9 +2493,15 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 
 	// Set each of the errors for the template.
 	loadLanguage('Errors');
+
+	$context['error_type'] = 'minor';
+
 	$context['post_error'] = array(
 		'messages' => array(),
+		// @todo error handling: maybe fatal errors can be error_type => serious
+		'error_type' => '',
 	);
+
 	foreach ($error_types as $error_type)
 	{
 		$context['post_error'][$error_type] = true;
@@ -2230,8 +2509,13 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 		{
 			if ($error_type == 'long_message')
 				$txt['error_' . $error_type] = sprintf($txt['error_' . $error_type], $modSettings['max_messageLength']);
+
 			$context['post_error']['messages'][] = $txt['error_' . $error_type];
 		}
+
+		// If it's not a minor error flag it as such.
+		if (!in_array($error_type, array('new_reply', 'not_approved', 'new_replies', 'old_topic', 'need_qr_verification', 'no_subject')))
+			$context['error_type'] = 'serious';
 	}
 
 	// We need to load the editor once more.
@@ -2242,9 +2526,11 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 		'id' => 'message',
 		'value' => $context['message'],
 		'width' => '90%',
+		'height' => '175px',
 		'labels' => array(
 			'post_button' => $txt['send_message'],
 		),
+		'preview_type' => 2,
 	);
 	create_control_richedit($editorOptions);
 
@@ -2265,7 +2551,7 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 
 	// Check whether we need to show the code again.
 	$context['require_verification'] = !$user_info['is_admin'] && !empty($modSettings['pm_posts_verification']) && $user_info['posts'] < $modSettings['pm_posts_verification'];
-	if ($context['require_verification'])
+	if ($context['require_verification'] && !isset($_REQUEST['xml']))
 	{
 		require_once($sourcedir . '/Subs-Editor.php');
 		$verificationOptions = array(
@@ -2278,6 +2564,8 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 	$context['to_value'] = empty($named_recipients['to']) ? '' : '&quot;' . implode('&quot;, &quot;', $named_recipients['to']) . '&quot;';
 	$context['bcc_value'] = empty($named_recipients['bcc']) ? '' : '&quot;' . implode('&quot;, &quot;', $named_recipients['bcc']) . '&quot;';
 
+	call_integration_hook('integrate_pm_error');
+
 	// No check for the previous submission is needed.
 	checkSubmitOnce('free');
 
@@ -2285,19 +2573,31 @@ function messagePostError($error_types, $named_recipients, $recipient_ids = arra
 	checkSubmitOnce('register');
 }
 
-// Send it!
+/**
+ * Send it!
+ */
 function MessagePost2()
 {
 	global $txt, $context, $sourcedir;
-	global $user_info, $modSettings, $scripturl, $smcFunc;
+	global $user_info, $modSettings, $smcFunc;
 
 	isAllowedTo('pm_send');
 	require_once($sourcedir . '/Subs-Auth.php');
+
+	// PM Drafts enabled and needed?
+	if ($context['drafts_pm_save'] && (isset($_POST['save_draft']) || isset($_POST['id_pm_draft'])))
+	{
+		$context['id_pm_draft'] = !empty($_POST['id_pm_draft']) ? (int) $_POST['id_pm_draft'] : 0;
+		require_once($sourcedir . '/Drafts.php');
+	}
 
 	loadLanguage('PersonalMessage', '', false);
 
 	// Extract out the spam settings - it saves database space!
 	list ($modSettings['max_pm_recipients'], $modSettings['pm_posts_verification'], $modSettings['pm_posts_per_hour']) = explode(',', $modSettings['pm_spam_settings']);
+
+	// Initialize the errors we're about to make.
+	$post_errors = array();
 
 	// Check whether we've gone over the limit of messages we can send per hour - fatal error if fails!
 	if (!empty($modSettings['pm_posts_per_hour']) && !allowedTo(array('admin_forum', 'moderate_forum', 'send_mail')) && $user_info['mod_cache']['bq'] == '0=1' && $user_info['mod_cache']['gq'] == '0=1')
@@ -2318,27 +2618,16 @@ function MessagePost2()
 		$smcFunc['db_free_result']($request);
 
 		if (!empty($postCount) && $postCount >= $modSettings['pm_posts_per_hour'])
-			fatal_lang_error('pm_too_many_per_hour', true, array($modSettings['pm_posts_per_hour']));
+		{
+			if (!isset($_REQUEST['xml']))
+				fatal_lang_error('pm_too_many_per_hour', true, array($modSettings['pm_posts_per_hour']));
+			else
+				$post_errors[] = 'pm_too_many_per_hour';
+		}
 	}
-
-	// If we came from WYSIWYG then turn it back into BBC regardless.
-	if (!empty($_POST['message_mode']) && isset($_POST['message']))
-	{
-		require_once($sourcedir . '/Subs-Editor.php');
-		$_POST['message'] = html_to_bbc($_POST['message']);
-
-		// We need to unhtml it now as it gets done shortly.
-		$_POST['message'] = un_htmlspecialchars($_POST['message']);
-
-		// We need this in case of errors etc.
-		$_REQUEST['message'] = $_POST['message'];
-	}
-
-	// Initialize the errors we're about to make.
-	$post_errors = array();
 
 	// If your session timed out, show an error, but do allow to re-submit.
-	if (checkSession('post', '', false) != '')
+	if (!isset($_REQUEST['xml']) && checkSession('post', '', false) != '')
 		$post_errors[] = 'session_timeout';
 
 	$_REQUEST['subject'] = isset($_REQUEST['subject']) ? trim($_REQUEST['subject']) : '';
@@ -2453,12 +2742,12 @@ function MessagePost2()
 		preparsecode($message);
 
 		// Make sure there's still some content left without the tags.
-		if ($smcFunc['htmltrim'](strip_tags(parse_bbc($smcFunc['htmlspecialchars']($message, ENT_QUOTES), false), '<img>')) === '' && (!allowedTo('admin_forum') || strpos($message, '[html]') === false))
+		if ($smcFunc['htmltrim'](strip_tags(parse_bbc($smcFunc['htmlspecialchars']($message, ENT_QUOTES), false), '<img>')) === '' && (!allowedTo('bbc_html') || strpos($message, '[html]') === false))
 			$post_errors[] = 'no_message';
 	}
 
 	// Wrong verification code?
-	if (!$user_info['is_admin'] && !empty($modSettings['pm_posts_verification']) && $user_info['posts'] < $modSettings['pm_posts_verification'])
+	if (!$user_info['is_admin'] && !isset($_REQUEST['xml']) && !empty($modSettings['pm_posts_verification']) && $user_info['posts'] < $modSettings['pm_posts_verification'])
 	{
 		require_once($sourcedir . '/Subs-Editor.php');
 		$verificationOptions = array(
@@ -2467,13 +2756,11 @@ function MessagePost2()
 		$context['require_verification'] = create_control_verification($verificationOptions, true);
 
 		if (is_array($context['require_verification']))
-		{
 			$post_errors = array_merge($post_errors, $context['require_verification']);
-		}
 	}
 
 	// If they did, give a chance to make ammends.
-	if (!empty($post_errors) && !$is_recipient_change && !isset($_REQUEST['preview']))
+	if (!empty($post_errors) && !$is_recipient_change && !isset($_REQUEST['preview']) && !isset($_REQUEST['xml']))
 		return messagePostError($post_errors, $namedRecipientList, $recipientList);
 
 	// Want to take a second glance before you send?
@@ -2512,6 +2799,13 @@ function MessagePost2()
 		return messagePostError(array(), $namedRecipientList, $recipientList);
 	}
 
+	// Want to save this as a draft and think about it some more?
+	if ($context['drafts_pm_save'] && isset($_POST['save_draft']))
+	{
+		SavePMDraft($post_errors, $recipientList);
+		return messagePostError($post_errors, $namedRecipientList, $recipientList);
+	}
+
 	// Before we send the PM, let's make sure we don't have an abuse of numbers.
 	elseif (!empty($modSettings['max_pm_recipients']) && count($recipientList['to']) + count($recipientList['bcc']) > $modSettings['max_pm_recipients'] && !allowedTo(array('moderate_forum', 'send_mail', 'admin_forum')))
 	{
@@ -2528,8 +2822,13 @@ function MessagePost2()
 	// Prevent double submission of this form.
 	checkSubmitOnce('check');
 
-	if (isset($_FILES['attachment']['name']) || !empty($_SESSION['temp_pm_attachments']))
+	// Check if they are trying to attach a new file...
+	if (!empty($_FILES['attachment']['name'][0]) || !empty($_SESSION['temp_pm_attachments']))
 	{	
+		// Check to make sure everybody can view PM attachments:
+		if (!canViewPMAttachments($recipientList))
+			return messagePostError($post_errors, $namedRecipientList, $recipientList);
+
 		// Verify they can post them (double checking for guests).
 		if (!allowedTo('pm_post_attachments') || $context['user']['is_guest'])
 			fatal_error($txt['pm_attach_not_allowed'], false);
@@ -2550,27 +2849,29 @@ function MessagePost2()
 		$quantity = 0;
 		$total_size = 0;
 
-	if (!empty($_SESSION['temp_pm_attachments']))
-		foreach ($_SESSION['temp_pm_attachments'] as $attachID => $name)
+		if (!empty($_SESSION['temp_pm_attachments']))
+		{
+			foreach ($_SESSION['temp_pm_attachments'] as $attachID => $name)
+			{
+				if (preg_match('~^post_tmp_' . $user_info['id'] . '_\d+$~', $attachID) == 0)
+					continue;
+
+				if (!empty($_POST['attach_del']) && !in_array($attachID, $_POST['attach_del']))
 				{
-					if (preg_match('~^post_tmp_' . $user_info['id'] . '_\d+$~', $attachID) == 0)
-						continue;
-	
-					if (!empty($_POST['attach_del']) && !in_array($attachID, $_POST['attach_del']))
-					{
-						unset($_SESSION['temp_pm_attachments'][$attachID]);
-						@unlink($current_attach_dir . '/' . $attachID);
-						continue;
-					}
-	
-					$_FILES['attachment']['tmp_name'][] = $attachID;
-					$_FILES['attachment']['name'][] = $name;
-					$_FILES['attachment']['size'][] = filesize($current_attach_dir . '/' . $attachID);
-					list ($_FILES['attachment']['width'][], $_FILES['attachment']['height'][]) = @getimagesize($current_attach_dir . '/' . $attachID);
-	
 					unset($_SESSION['temp_pm_attachments'][$attachID]);
+					@unlink($current_attach_dir . '/' . $attachID);
+					continue;
 				}
-		
+
+				$_FILES['attachment']['tmp_name'][] = $attachID;
+				$_FILES['attachment']['name'][] = $name;
+				$_FILES['attachment']['size'][] = filesize($current_attach_dir . '/' . $attachID);
+				list ($_FILES['attachment']['width'][], $_FILES['attachment']['height'][]) = @getimagesize($current_attach_dir . '/' . $attachID);
+
+				unset($_SESSION['temp_pm_attachments'][$attachID]);
+			}
+		}
+
 		if (!isset($_FILES['attachment']['name']))
 			$_FILES['attachment']['tmp_name'] = array();
 
@@ -2623,8 +2924,8 @@ function MessagePost2()
 	}
 
 	// Do the actual sending of the PM.
-	if (!empty($recipientList['to']) || !empty($recipientList['bcc']))	
-		$context['send_log'] = sendpm($recipientList, $_REQUEST['subject'], $_REQUEST['message'], !empty($_REQUEST['outbox']), null, !empty($_REQUEST['pm_head']) ? (int) $_REQUEST['pm_head'] : 0, empty($attachIDs) ? array() : $attachIDs);
+	if (!empty($recipientList['to']) || !empty($recipientList['bcc']))
+		$context['send_log'] = sendpm($recipientList, $_REQUEST['subject'], $_REQUEST['message'], true, null, !empty($_REQUEST['pm_head']) ? (int) $_REQUEST['pm_head'] : 0, empty($attachIDs) ? array() : $attachIDs);
 	else
 		$context['send_log'] = array(
 			'sent' => array(),
@@ -2655,55 +2956,24 @@ function MessagePost2()
 
 	// Message sent successfully?
 	if (!empty($context['send_log']) && empty($context['send_log']['failed']))
+	{
 		$context['current_label_redirect'] = $context['current_label_redirect'] . ';done=sent';
+
+		// If we had a PM draft for this one, then its time to remove it since it was just sent
+		if ($context['drafts_pm_save'] && !empty($_POST['id_pm_draft']))
+			DeleteDraft($_POST['id_pm_draft']);
+	}
 
 	// Go back to the where they sent from, if possible...
 	redirectexit($context['current_label_redirect']);
 }
 
-// This function lists all buddies for wireless protocols.
-function WirelessAddBuddy()
-{
-	global $scripturl, $txt, $user_info, $context, $smcFunc;
-
-	isAllowedTo('pm_send');
-	$context['page_title'] = $txt['wireless_pm_add_buddy'];
-
-	$current_buddies = empty($_REQUEST['u']) ? array() : explode(',', $_REQUEST['u']);
-	foreach ($current_buddies as $key => $buddy)
-		$current_buddies[$key] = (int) $buddy;
-
-	$base_url = $scripturl . '?action=pm;sa=send;u=' . (empty($current_buddies) ? '' : implode(',', $current_buddies) . ',');
-	$context['pm_href'] = $scripturl . '?action=pm;sa=send' . (empty($current_buddies) ? '' : ';u=' . implode(',', $current_buddies));
-
-	$context['buddies'] = array();
-	if (!empty($user_info['buddies']))
-	{
-		$request = $smcFunc['db_query']('', '
-			SELECT id_member, real_name
-			FROM {db_prefix}members
-			WHERE id_member IN ({array_int:buddy_list})
-			ORDER BY real_name
-			LIMIT ' . count($user_info['buddies']),
-			array(
-				'buddy_list' => $user_info['buddies'],
-			)
-		);
-		while ($row = $smcFunc['db_fetch_assoc']($request))
-			$context['buddies'][] = array(
-				'id' => $row['id_member'],
-				'name' => $row['real_name'],
-				'selected' => in_array($row['id_member'], $current_buddies),
-				'add_href' => $base_url . $row['id_member'],
-			);
-		$smcFunc['db_free_result']($request);
-	}
-}
-
-// This function performs all additional stuff...
+/**
+ * This function performs all additional stuff...
+ */
 function MessageActionsApply()
 {
-	global $txt, $context, $user_info, $options, $smcFunc;
+	global $context, $user_info, $options, $smcFunc;
 
 	checkSession('request');
 
@@ -2759,6 +3029,7 @@ function MessageActionsApply()
 	$to_delete = array();
 	$to_label = array();
 	$label_type = array();
+	$labels = array();
 	foreach ($_REQUEST['pm_actions'] as $pm => $action)
 	{
 		if ($action === 'delete')
@@ -2778,7 +3049,7 @@ function MessageActionsApply()
 			else
 				$type = 'unk';
 
-			if ($action == '-1' || $action == '0' || (int) $action > 0)
+			if ($action == '-1' || (int) $action > 0)
 			{
 				$to_label[(int) $pm] = (int) $action;
 				$label_type[(int) $pm] = $type;
@@ -2793,11 +3064,33 @@ function MessageActionsApply()
 	// Are we labeling anything?
 	if (!empty($to_label) && $context['folder'] == 'inbox')
 	{
-		$updateErrors = 0;
+		// Are we dealing with conversation view? If so, get all the messages in each conversation
+		if ($context['display_mode'] == 2)
+		{
+			$get_pms = $smcFunc['db_query']('', '
+				SELECT pm.id_pm_head, pm.id_pm
+				FROM {db_prefix}personal_messages AS pm
+					INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)
+				WHERE pm.id_pm_head IN ({array_int:head_pms})
+					AND pm.id_pm NOT IN ({array_int:head_pms})
+					AND pmr.id_member = {int:current_member}',
+				array(
+					'head_pms' => array_keys($to_label),
+					'current_member' => $user_info['id'],
+				)
+			);
+
+			while ($other_pms = $smcFunc['db_fetch_assoc']($get_pms))
+			{
+				$to_label[$other_pms['id_pm']] = $to_label[$other_pms['id_pm_head']];
+			}
+
+			$smcFunc['db_free_result']($get_pms);
+		}
 
 		// Get information about each message...
 		$request = $smcFunc['db_query']('', '
-			SELECT id_pm, labels
+			SELECT id_pm, in_inbox
 			FROM {db_prefix}pm_recipients
 			WHERE id_member = {int:current_member}
 				AND id_pm IN ({array_int:to_label})
@@ -2807,88 +3100,157 @@ function MessageActionsApply()
 				'to_label' => array_keys($to_label),
 			)
 		);
+
 		while ($row = $smcFunc['db_fetch_assoc']($request))
 		{
-			$labels = $row['labels'] == '' ? array('-1') : explode(',', trim($row['labels']));
+			// Get the labels as well, but only if we're not dealing with the inbox
+			if ($to_label[$row['id_pm']] != '-1')
+			{
+				// The JOIN here ensures we only get labels that this user has applied to this PM
+				$request2 = $smcFunc['db_query']('', '
+					SELECT l.id_label, pml.id_pm
+					FROM {db_prefix}pm_labels AS l
+						INNER JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_label = l.id_label)
+					WHERE l.id_member = {int:current_member}
+						AND pml.id_pm = {int:current_pm}',
+					array(
+						'current_member' => $user_info['id'],
+						'current_pm' => $row['id_pm'],
+					)
+				);
 
-			// Already exists?  Then... unset it!
-			$ID_LABEL = array_search($to_label[$row['id_pm']], $labels);
-			if ($ID_LABEL !== false && $label_type[$row['id_pm']] !== 'add')
-				unset($labels[$ID_LABEL]);
-			elseif ($label_type[$row['id_pm']] !== 'rem')
-				$labels[] = $to_label[$row['id_pm']];
+				while ($row2 = $smcFunc['db_fetch_assoc']($request2))
+				{
+					$labels[$row2['id_label']] = $row2['id_label'];
+				}
 
-			if (!empty($options['pm_remove_inbox_label']) && $to_label[$row['id_pm']] != '-1' && ($key = array_search('-1', $labels)) !== false)
-				unset($labels[$key]);
+				$smcFunc['db_free_result']($request2);
+			}
+			elseif ($type == 'rem')
+			{
+				// If we're removing from the inbox, see if we have at least one other label.
+				// This query is faster than the one above
+				$request2 = $smcFunc['db_query']('', '
+					SELECT COUNT(*)
+					FROM {db_prefix}pm_labels AS l
+						INNER JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_label = l.id_label)
+					WHERE l.id_member = {int:current_member}
+						AND pml.id_pm = {int:current_pm}',
+					array(
+						'current_member' => $user_info['id'],
+						'current_pm' => $row['id_pm'],
+					)
+				);
 
-			$set = implode(',', array_unique($labels));
-			if ($set == '')
-				$set = '-1';
+				// How many labels do you have?
+				list ($num_labels) = $smcFunc['db_fetch_assoc']($request2);
 
-			// Check that this string isn't going to be too large for the database.
-			if ($smcFunc['strlen']($set) > 60)
-				$updateErrors++;
+				if ($num_labels > 0)
+					$context['can_remove_inbox'] = true;
+
+				$smcFunc['db_free_result']($request2);
+			}
+
+			// Use this to determine what to do later on...
+			$original_labels = $labels;
+
+			// Ignore inbox for now - we'll deal with it later
+			if ($to_label[$row['id_pm']] != '-1')
+			{
+				// If this label is in the list and we're not adding it, remove it
+				if (array_key_exists($to_label[$row['id_pm']], $labels) && $type !== 'add')
+					unset($labels[$to_label[$row['id_pm']]]);
+				elseif ($type !== 'rem')
+					$labels[$to_label[$row['id_pm']]] = $to_label[$row['id_pm']];
+			}
+
+			// Removing all labels or just removing the inbox label
+			if ($type == 'rem' && empty($labels))
+				$in_inbox = (empty($context['can_remove_inbox']) ? 1 : 0);
+			// Adding new labels, but removing inbox and applying new ones
+			elseif ($type == 'add' && !empty($options['pm_remove_inbox_label']) && !empty($labels))
+				$in_inbox = 0;
+			// Just adding it to the inbox
 			else
+				$in_inbox = 1;
+
+			// Are we adding it to or removing it from the inbox?
+			if ($in_inbox != $row['in_inbox'])
 			{
 				$smcFunc['db_query']('', '
 					UPDATE {db_prefix}pm_recipients
-					SET labels = {string:labels}
+					SET in_inbox = {int:in_inbox}
 					WHERE id_pm = {int:id_pm}
 						AND id_member = {int:current_member}',
 					array(
 						'current_member' => $user_info['id'],
 						'id_pm' => $row['id_pm'],
-						'labels' => $set,
+						'in_inbox' => $in_inbox,
 					)
+				);
+			}
+
+			// Which labels do we not want now?
+			$labels_to_remove = array_diff($original_labels, $labels);
+
+			// Don't apply it if it's already applied
+			$labels_to_apply = array_diff($labels, $original_labels);
+
+			// Remove labels
+			if (!empty($labels_to_remove))
+			{
+				$smcFunc['db_query']('', '
+					DELETE FROM {db_prefix}pm_labeled_messages
+					WHERE id_pm = {int:current_pm}
+						AND id_label IN ({array_int:labels_to_remove})',
+					array(
+						'current_pm' => $row['id_pm'],
+						'labels_to_remove' => $labels_to_remove,
+					)
+				);
+			}
+
+			// Add new ones
+			if (!empty($labels_to_apply))
+			{
+				$inserts = array();
+				foreach ($labels_to_apply as $label)
+					$inserts[] = array($row['id_pm'], $label);
+
+				$smcFunc['db_insert']('',
+					'{db_prefix}pm_labeled_messages',
+					array('id_pm' => 'int', 'id_label' => 'int'),
+					$inserts,
+					array()
 				);
 			}
 		}
 		$smcFunc['db_free_result']($request);
-
-		// Any errors?
-		// !!! Separate the sprintf?
-		if (!empty($updateErrors))
-			fatal_lang_error('labels_too_many', true, array($updateErrors));
 	}
 
 	// Back to the folder.
 	$_SESSION['pm_selected'] = array_keys($to_label);
-	redirectexit($context['current_label_redirect'] . (count($to_label) == 1 ? '#msg' . $_SESSION['pm_selected'][0] : ''), count($to_label) == 1 && $context['browser']['is_ie']);
+	redirectexit($context['current_label_redirect'] . (count($to_label) == 1 ? '#msg' . $_SESSION['pm_selected'][0] : ''), count($to_label) == 1 && isBrowser('ie'));
 }
 
-// Are you sure you want to PERMANENTLY (mostly) delete ALL your messages?
-function MessageKillAllQuery()
-{
-	global $txt, $context;
-
-	// Only have to set up the template....
-	$context['sub_template'] = 'ask_delete';
-	$context['page_title'] = $txt['delete_all'];
-	$context['delete_all'] = $_REQUEST['f'] == 'all';
-
-	// And set the folder name...
-	$txt['delete_all'] = str_replace('PMBOX', $context['folder'] != 'sent' ? $txt['inbox'] : $txt['sent_items'], $txt['delete_all']);
-}
-
-// Delete ALL the messages!
+/**
+ * Delete ALL the messages!
+ */
 function MessageKillAll()
 {
 	global $context;
 
-	checkSession('get');
+	checkSession();
 
-	// If all then delete all messages the user has.
-	if ($_REQUEST['f'] == 'all')
-		deleteMessages(null, null);
-	// Otherwise just the selected folder.
-	else
-		deleteMessages(null, $_REQUEST['f'] != 'sent' ? 'inbox' : 'sent');
+	deleteMessages(null, null);
 
 	// Done... all gone.
 	redirectexit($context['current_label_redirect']);
 }
 
-// This function allows the user to delete all messages older than so many days.
+/**
+ * This function allows the user to delete all messages older than so many days.
+ */
 function MessagePrune()
 {
 	global $txt, $context, $user_info, $scripturl, $smcFunc;
@@ -2956,7 +3318,13 @@ function MessagePrune()
 	$context['page_title'] = $txt['pm_prune'];
 }
 
-// Delete the specified personal messages.
+/**
+ * Delete the specified personal messages.
+ *
+ * @param array|null $personal_messages An array containing the IDs of PMs to delete or null to delete all of them
+ * @param string|null $folder Which "folder" to delete PMs from - 'sent' to delete them from the outbox, null or anything else to delete from the inbox
+ * @param array|int|null $owner An array of IDs of users whose PMs are being deleted, the ID of a single user or null to use the current user's ID
+ */
 function deleteMessages($personal_messages, $folder = null, $owner = null)
 {
 	global $user_info, $smcFunc, $sourcedir;
@@ -3033,7 +3401,7 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 		// Do the actual deletion.
 		$smcFunc['db_query']('', '
 			UPDATE {db_prefix}pm_recipients
-			SET deleted = {int:is_deleted}, attachments = {string:blank_string}, downloads = {string:blank_string}
+			SET deleted = {int:is_deleted}
 			WHERE id_member IN ({array_int:member_list})
 				AND deleted = {int:not_deleted}' . $where,
 			array(
@@ -3044,6 +3412,40 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 				'pm_list' => $personal_messages !== null ? array_unique($personal_messages) : array(),
 			)
 		);
+
+		$labels = array();
+
+		// Get any labels that the owner may have applied to this PM
+		// The join is here to ensure we only get labels applied by the specified member(s)
+		$get_labels = $smcFunc['db_query']('', '
+			SELECT pml.id_label
+			FROM {db_prefix}pm_labels AS l
+				INNER JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_label = l.id_label)
+			WHERE l.id_member IN ({array_int:member_list})' . $where,
+			array(
+				'member_list' => $owner,
+				'pm_list' => $personal_messages !== null ? array_unique($personal_messages) : array(),
+			)
+		);
+
+		while ($row = $smcFunc['db_fetch_assoc']($get_labels))
+		{
+			$labels[] = $row['id_label'];
+		}
+
+		$smcFunc['db_free_result']($get_labels);
+
+		if (!empty($labels))
+		{
+			$smcFunc['db_query']('', '
+				DELETE FROM {db_prefix}pm_labeled_messages
+				WHERE id_label IN ({array_int:labels})' . $where,
+				array(
+					'labels' => $labels,
+					'pm_list' => $personal_messages !== null ? array_unique($personal_messages) : array(),
+				)
+			);
+		}
 	}
 
 	// If sender and recipients all have deleted their message, it can be removed.
@@ -3051,10 +3453,8 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 		SELECT pm.id_pm AS sender, pmr.id_pm
 		FROM {db_prefix}personal_messages AS pm
 			LEFT JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm AND pmr.deleted = {int:not_deleted})
-		WHERE pm.deleted_by_sender = {int:is_deleted}
-			' . str_replace('id_pm', 'pm.id_pm', $where) . '
-		GROUP BY sender, pmr.id_pm
-		HAVING pmr.id_pm IS null',
+		WHERE pm.deleted_by_sender = {int:is_deleted} AND pmr.id_pm is null
+			' . str_replace('id_pm', 'pm.id_pm', $where),
 		array(
 			'not_deleted' => 0,
 			'is_deleted' => 1,
@@ -3078,6 +3478,14 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 
 		$smcFunc['db_query']('', '
 			DELETE FROM {db_prefix}pm_recipients
+			WHERE id_pm IN ({array_int:pm_list})',
+			array(
+				'pm_list' => $remove_pms,
+			)
+		);
+
+		$smcFunc['db_query']('', '
+			DELETE FROM {db_prefix}pm_labeled_messages
 			WHERE id_pm IN ({array_int:pm_list})',
 			array(
 				'pm_list' => $remove_pms,
@@ -3116,7 +3524,13 @@ function deleteMessages($personal_messages, $folder = null, $owner = null)
 	cache_put_data('labelCounts:' . $user_info['id'], null, 720);
 }
 
-// Mark personal messages read.
+/**
+ * Mark the specified personal messages read.
+ *
+ * @param array|null $personal_messages An array of PM IDs to mark or null to mark all
+ * @param int|null $label The ID of a label. If set, only messages with this label will be marked.
+ * @param int|null $owner If owner is set, marks messages owned by that member id
+ */
 function markMessages($personal_messages = null, $label = null, $owner = null)
 {
 	global $user_info, $context, $smcFunc;
@@ -3124,17 +3538,46 @@ function markMessages($personal_messages = null, $label = null, $owner = null)
 	if ($owner === null)
 		$owner = $user_info['id'];
 
+	$in_inbox = '';
+
+	// Marking all messages with a specific label as read?
+	// If we know which PMs we're marking read, then we don't need label info
+	if ($personal_messages === null && $label !== null && $label != '-1')
+	{
+		$personal_messages = array();
+		$get_messages = $smcFunc['db_query']('', '
+			SELECT id_pm
+			FROM {db_prefix}pm_labeled_messages
+			WHERE id_label = {int:current_label}',
+			array(
+				'current_label' => $label,
+			)
+		);
+
+		while ($row = $smcFunc['db_fetch_assoc']($get_messages))
+		{
+			$personal_messages[] = $row['id_pm'];
+		}
+
+		$smcFunc['db_free_result']($get_messages);
+	}
+	elseif ($label = '-1')
+	{
+		// Marking all PMs in your inbox read
+		$in_inbox = '
+			AND in_inbox = {int:in_inbox}';
+	}
+
 	$smcFunc['db_query']('', '
 		UPDATE {db_prefix}pm_recipients
 		SET is_read = is_read | 1
 		WHERE id_member = {int:id_member}
-			AND NOT (is_read & 1 >= 1)' . ($label === null ? '' : '
-			AND FIND_IN_SET({string:label}, labels) != 0') . ($personal_messages !== null ? '
-			AND id_pm IN ({array_int:personal_messages})' : ''),
+			AND NOT (is_read & 1 >= 1)' . ($personal_messages !== null ? '
+			AND id_pm IN ({array_int:personal_messages})' : '') . $in_inbox,
 		array(
 			'personal_messages' => $personal_messages,
 			'id_member' => $owner,
-			'label' => $label,
+			'in_inbox' => 1,
 		)
 	);
 
@@ -3148,12 +3591,12 @@ function markMessages($personal_messages = null, $label = null, $owner = null)
 		}
 
 		$result = $smcFunc['db_query']('', '
-			SELECT labels, COUNT(*) AS num
+			SELECT id_pm, in_inbox, COUNT(*) AS num
 			FROM {db_prefix}pm_recipients
 			WHERE id_member = {int:id_member}
 				AND NOT (is_read & 1 >= 1)
 				AND deleted = {int:is_not_deleted}
-			GROUP BY labels',
+			GROUP BY id_pm, in_inbox',
 			array(
 				'id_member' => $owner,
 				'is_not_deleted' => 0,
@@ -3164,12 +3607,36 @@ function markMessages($personal_messages = null, $label = null, $owner = null)
 		{
 			$total_unread += $row['num'];
 
-			if ($owner != $user_info['id'])
+			if ($owner != $user_info['id'] || empty($row['id_pm']))
 				continue;
 
-			$this_labels = explode(',', $row['labels']);
+			$this_labels = array();
+
+			// Get all the labels
+			$result2 = $smcFunc['db_query']('', '
+				SELECT pml.id_label
+				FROM {db_prefix}pm_labels AS l
+					INNER JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_label = l.id_label)
+				WHERE l.id_member = {int:id_member}
+					AND pml.id_pm = {int:current_pm}',
+				array(
+					'id_member' => $owner,
+					'current_pm' => $row['id_pm'],
+				)
+			);
+
+			while ($row2 = $smcFunc['db_fetch_assoc']($result2))
+			{
+				$this_labels[] = $row2['id_label'];
+			}
+
+			$smcFunc['db_free_result']($result2);
+
 			foreach ($this_labels as $this_label)
-				$context['labels'][(int) $this_label]['unread_messages'] += $row['num'];
+				$context['labels'][$this_label]['unread_messages'] += $row['num'];
+
+			if ($row['in_inbox'] == 1)
+				$context['labels'][-1]['unread_messages'] += $row['num'];
 		}
 		$smcFunc['db_free_result']($result);
 
@@ -3183,7 +3650,9 @@ function markMessages($personal_messages = null, $label = null, $owner = null)
 	}
 }
 
-// This function handles adding, deleting and editing labels on messages.
+/**
+ * This function handles adding, deleting and editing labels on messages.
+ */
 function ManageLabels()
 {
 	global $txt, $context, $user_info, $scripturl, $smcFunc;
@@ -3198,7 +3667,11 @@ function ManageLabels()
 	$context['sub_template'] = 'labels';
 
 	$the_labels = array();
-	// Add all existing labels to the array to save, slashing them as necessary...
+	$labels_to_add = array();
+	$labels_to_remove = array();
+	$label_updates = array();
+
+	// Add all of the current user's existing labels to the array to save, slashing them as necessary...
 	foreach ($context['labels'] as $label)
 	{
 		if ($label['id'] != -1)
@@ -3207,11 +3680,10 @@ function ManageLabels()
 
 	if (isset($_POST[$context['session_var']]))
 	{
-		checkSession('post');
+		checkSession();
 
 		// This will be for updating messages.
 		$message_changes = array();
-		$new_labels = array();
 		$rule_changes = array();
 
 		// Will most likely need this.
@@ -3225,27 +3697,26 @@ function ManageLabels()
 			if ($smcFunc['strlen']($_POST['label']) > 30)
 				$_POST['label'] = $smcFunc['substr']($_POST['label'], 0, 30);
 			if ($_POST['label'] != '')
+			{
 				$the_labels[] = $_POST['label'];
+				$labels_to_add[] = $_POST['label'];
+			}
 		}
 		// Deleting an existing label?
 		elseif (isset($_POST['delete'], $_POST['delete_label']))
 		{
-			$i = 0;
-			foreach ($the_labels as $id => $name)
+			foreach ($_POST['delete_label'] AS $label => $dummy)
 			{
-				if (isset($_POST['delete_label'][$id]))
+				if (array_key_exists($label, $the_labels))
 				{
-					unset($the_labels[$id]);
-					$message_changes[$id] = true;
+					unset($the_labels[$label]);
+					$labels_to_remove[] = $label;
 				}
-				else
-					$new_labels[$id] = $i++;
 			}
 		}
 		// The hardest one to deal with... changes.
 		elseif (isset($_POST['save']) && !empty($_POST['label_name']))
 		{
-			$i = 0;
 			foreach ($the_labels as $id => $name)
 			{
 				if ($id == -1)
@@ -3258,76 +3729,115 @@ function ManageLabels()
 						$_POST['label_name'][$id] = $smcFunc['substr']($_POST['label_name'][$id], 0, 30);
 					if ($_POST['label_name'][$id] != '')
 					{
+						// Changing the name of this label?
+						if ($the_labels[$id] != $_POST['label_name'][$id])
+							$label_updates[$id] = $_POST['label_name'][$id];
+
 						$the_labels[(int) $id] = $_POST['label_name'][$id];
-						$new_labels[$id] = $i++;
 					}
 					else
 					{
 						unset($the_labels[(int) $id]);
+						$labels_to_remove[] = $id;
 						$message_changes[(int) $id] = true;
 					}
 				}
-				else
-					$new_labels[$id] = $i++;
 			}
 		}
 
-		// Save the label status.
-		updateMemberData($user_info['id'], array('message_labels' => implode(',', $the_labels)));
-
-		// Update all the messages currently with any label changes in them!
-		if (!empty($message_changes))
+		// Save any new labels
+		if (!empty($labels_to_add))
 		{
-			$searchArray = array_keys($message_changes);
+			$inserts = array();
+			foreach ($labels_to_add AS $label)
+				$inserts[] = array($user_info['id'], $label);
 
-			if (!empty($new_labels))
+			$smcFunc['db_insert']('', '{db_prefix}pm_labels', array('id_member' => 'int', 'name' => 'string-30'), $inserts, array());
+		}
+
+		// Update existing labels as needed
+		if (!empty($label_updates))
+		{
+			foreach ($label_updates AS $id => $name)
 			{
-				for ($i = max($searchArray) + 1, $n = max(array_keys($new_labels)); $i <= $n; $i++)
-					$searchArray[] = $i;
-			}
-
-			// Now find the messages to change.
-			$request = $smcFunc['db_query']('', '
-				SELECT id_pm, labels
-				FROM {db_prefix}pm_recipients
-				WHERE FIND_IN_SET({raw:find_label_implode}, labels) != 0
-					AND id_member = {int:current_member}',
-				array(
-					'current_member' => $user_info['id'],
-					'find_label_implode' => '\'' . implode('\', labels) != 0 OR FIND_IN_SET(\'', $searchArray) . '\'',
-				)
-			);
-			while ($row = $smcFunc['db_fetch_assoc']($request))
-			{
-				// Do the long task of updating them...
-				$toChange = explode(',', $row['labels']);
-
-				foreach ($toChange as $key => $value)
-					if (in_array($value, $searchArray))
-					{
-						if (isset($new_labels[$value]))
-							$toChange[$key] = $new_labels[$value];
-						else
-							unset($toChange[$key]);
-					}
-
-				if (empty($toChange))
-					$toChange[] = '-1';
-
-				// Update the message.
 				$smcFunc['db_query']('', '
-					UPDATE {db_prefix}pm_recipients
-					SET labels = {string:new_labels}
-					WHERE id_pm = {int:id_pm}
-						AND id_member = {int:current_member}',
+					UPDATE {db_prefix}pm_labels
+					SET name = {string:name}
+					WHERE id_label = {int:id_label}
+					AND id_member = {int:current_member}',
 					array(
+						'name' => $name,
+						'id_label' => $id,
 						'current_member' => $user_info['id'],
-						'id_pm' => $row['id_pm'],
-						'new_labels' => implode(',', array_unique($toChange)),
 					)
 				);
 			}
-			$smcFunc['db_free_result']($request);
+		}
+
+		// Now the fun part... Deleting labels.
+		if (!empty($labels_to_remove))
+		{
+			// First delete the labels
+			$smcFunc['db_query']('', '
+				DELETE FROM {db_prefix}pm_labels
+				WHERE id_label IN ({array_int:labels_to_delete})
+				AND id_member = {int:current_member}',
+				array(
+					'labels_to_delete' => $labels_to_remove,
+					'current_member' => $user_info['id'],
+				)
+			);
+
+			// Now remove the now-deleted labels from any PMs...
+			$smcFunc['db_query']('', '
+				DELETE FROM {db_prefix}pm_labeled_messages
+				WHERE id_label IN ({array_int:labels_to_delete})',
+				array(
+					'labels_to_delete' => $labels_to_remove,
+				)
+			);
+
+			// Get any PMs with no labels which aren't in the inbox
+			$get_stranded_pms = $smcFunc['db_query']('', '
+				SELECT pmr.id_pm
+				FROM {db_prefix}pm_recipients AS pmr
+					LEFT JOIN {db_prefix}pm_labeled_messages AS pml ON (pml.id_pm = pmr.id_pm)
+				WHERE pml.id_label IS NULL
+					AND pmr.in_inbox = {int:not_in_inbox}
+					AND pmr.deleted = {int:not_deleted}
+					AND pmr.id_member = {int:current_member}',
+				array(
+					'not_in_inbox' => 0,
+					'not_deleted' => 0,
+					'current_member' => $user_info['id'],
+				)
+			);
+
+			$stranded_messages = array();
+			while ($row = $smcFunc['db_fetch_assoc']($get_stranded_pms))
+			{
+				$stranded_messages[] = $row['id_pm'];
+			}
+
+			$smcFunc['db_free_result']($get_stranded_pms);
+
+			// Move these back to the inbox if necessary
+			if (!empty($stranded_messages))
+			{
+				// We now have more messages in the inbox
+				$context['labels'][-1]['messages'] += count($stranded_messages);
+				$smcFunc['db_query']('', '
+					UPDATE {db_prefix}pm_recipients
+					SET in_inbox = {int:in_inbox}
+					WHERE id_pm IN ({array_int:stranded_messages})
+						AND id_member = {int:current_member}',
+					array(
+						'stranded_messages' => $stranded_messages,
+						'in_inbox' => 1,
+						'current_member' => $user_info['id'],
+					)
+				);
+			}
 
 			// Now do the same the rules - check through each rule.
 			foreach ($context['rules'] as $k => $rule)
@@ -3335,15 +3845,13 @@ function ManageLabels()
 				// Each action...
 				foreach ($rule['actions'] as $k2 => $action)
 				{
-					if ($action['t'] != 'lab' || !in_array($action['v'], $searchArray))
+					if ($action['t'] != 'lab' || !in_array($action['v'], $labels_to_remove))
 						continue;
 
 					$rule_changes[] = $rule['id'];
-					// If we're here we have a label which is either changed or gone...
-					if (isset($new_labels[$action['v']]))
-						$context['rules'][$k]['actions'][$k2]['v'] = $new_labels[$action['v']];
-					else
-						unset($context['rules'][$k]['actions'][$k2]);
+
+					// Can't apply this label anymore if it doesn't exist
+					unset($context['rules'][$k]['actions'][$k2]);
 				}
 			}
 		}
@@ -3364,7 +3872,7 @@ function ManageLabels()
 						array(
 							'current_member' => $user_info['id'],
 							'id_rule' => $id,
-							'actions' => serialize($context['rules'][$id]['actions']),
+							'actions' => $smcFunc['json_encode']($context['rules'][$id]['actions']),
 						)
 					);
 					unset($rule_changes[$k]);
@@ -3375,7 +3883,7 @@ function ManageLabels()
 				$smcFunc['db_query']('', '
 					DELETE FROM {db_prefix}pm_rules
 					WHERE id_rule IN ({array_int:rule_list})
-							AND id_member = {int:current_member}',
+						AND id_member = {int:current_member}',
 					array(
 						'current_member' => $user_info['id'],
 						'rule_list' => $rule_changes,
@@ -3391,10 +3899,17 @@ function ManageLabels()
 	}
 }
 
-// Edit Personal Message Settings
+/**
+ * Allows to edit Personal Message Settings.
+ *
+ * Uses Profile.php
+ * Uses Profile-Modify.php
+ * Uses Profile template.
+ * Uses Profile language file.
+ */
 function MessageSettings()
 {
-	global $txt, $user_settings, $user_info, $context, $sourcedir, $smcFunc;
+	global $txt, $user_info, $context, $sourcedir;
 	global $scripturl, $profile_vars, $cur_profile, $user_profile;
 
 	// Need this for the display.
@@ -3410,6 +3925,8 @@ function MessageSettings()
 	loadLanguage('Profile');
 	loadTemplate('Profile');
 
+	// Since this is internally handled with the profile code because that's how it was done ages ago
+	// we have to set everything up for handling this...
 	$context['page_title'] = $txt['pm_settings'];
 	$context['user']['is_owner'] = true;
 	$context['id_member'] = $user_info['id'];
@@ -3417,6 +3934,11 @@ function MessageSettings()
 	$context['menu_item_selected'] = 'settings';
 	$context['submit_button_text'] = $txt['pm_settings'];
 	$context['profile_header_text'] = $txt['personal_messages'];
+	$context['sub_template'] = 'edit_options';
+	$context['page_desc'] = $txt['pm_settings_desc'];
+
+	loadThemeOptions($user_info['id']);
+	loadCustomFields($user_info['id'], 'pmprefs');
 
 	// Add our position to the linktree.
 	$context['linktree'][] = array(
@@ -3427,7 +3949,7 @@ function MessageSettings()
 	// Are they saving?
 	if (isset($_REQUEST['save']))
 	{
-		checkSession('post');
+		checkSession();
 
 		// Mimic what profile would do.
 		$_POST = htmltrim__recursive($_POST);
@@ -3440,14 +3962,25 @@ function MessageSettings()
 			updateMemberData($user_info['id'], $profile_vars);
 	}
 
-	// Load up the fields.
-	pmprefs($user_info['id']);
+	setupProfileContext(
+		array(
+			'pm_prefs',
+		)
+	);
 }
 
-// Allows a user to report a personal message they receive to the administrator.
+/**
+ * Allows the user to report a personal message to an administrator.
+ *
+ * - In the first instance requires that the ID of the message to report is passed through $_GET.
+ * - It allows the user to report to either a particular administrator - or the whole admin team.
+ * - It will forward on a copy of the original message without allowing the reporter to make changes.
+ *
+ * @uses template_report_message()
+ */
 function ReportMessage()
 {
-	global $txt, $context, $scripturl, $sourcedir;
+	global $txt, $context, $scripturl;
 	global $user_info, $language, $modSettings, $smcFunc;
 
 	// Check that this feature is even enabled!
@@ -3467,7 +4000,7 @@ function ReportMessage()
 	{
 		$context['sub_template'] = 'report_message';
 
-		// !!! I don't like being able to pick who to send it to.  Favoritism, etc. sucks.
+		// @todo I don't like being able to pick who to send it to.  Favoritism, etc. sucks.
 		// Now, get all the administrators.
 		$request = $smcFunc['db_query']('', '
 			SELECT id_member, real_name
@@ -3490,11 +4023,11 @@ function ReportMessage()
 	else
 	{
 		// Check the session before proceeding any further!
-		checkSession('post');
+		checkSession();
 
 		// First, pull out the message contents, and verify it actually went to them!
 		$request = $smcFunc['db_query']('', '
-			SELECT pm.subject, pm.body, pm.msgtime, pm.id_member_from, IFNULL(m.real_name, pm.from_name) AS sender_name
+			SELECT pm.subject, pm.body, pm.msgtime, pm.id_member_from, COALESCE(m.real_name, pm.from_name) AS sender_name
 			FROM {db_prefix}personal_messages AS pm
 				INNER JOIN {db_prefix}pm_recipients AS pmr ON (pmr.id_pm = pm.id_pm)
 				LEFT JOIN {db_prefix}members AS m ON (m.id_member = pm.id_member_from)
@@ -3575,11 +4108,11 @@ function ReportMessage()
 			SELECT id_member, real_name, lngfile
 			FROM {db_prefix}members
 			WHERE (id_group = {int:admin_id} OR FIND_IN_SET({int:admin_id}, additional_groups) != 0)
-				' . (empty($_POST['ID_ADMIN']) ? '' : 'AND id_member = {int:specific_admin}') . '
+				' . (empty($_POST['id_admin']) ? '' : 'AND id_member = {int:specific_admin}') . '
 			ORDER BY lngfile',
 			array(
 				'admin_id' => 1,
-				'specific_admin' => isset($_POST['ID_ADMIN']) ? (int) $_POST['ID_ADMIN'] : 0,
+				'specific_admin' => isset($_POST['id_admin']) ? (int) $_POST['id_admin'] : 0,
 			)
 		);
 
@@ -3606,7 +4139,7 @@ function ReportMessage()
 				$report_body .= "\n" . '[b]' . $_POST['reason'] . '[/b]' . "\n\n";
 				if (!empty($recipients))
 					$report_body .= $txt['pm_report_pm_other_recipients'] . ' ' . implode(', ', $recipients) . "\n\n";
-				$report_body .= $txt['pm_report_pm_unedited_below'] . "\n" . '[quote author=' . (empty($memberFromID) ? '&quot;' . $memberFromName . '&quot;' : $memberFromName . ' link=action=profile;u=' . $memberFromID . ' date=' . $time) . ']' . "\n" . un_htmlspecialchars($body) . '[/quote]';
+				$report_body .= $txt['pm_report_pm_unedited_below'] . "\n" . '[quote author=' . (empty($memberFromID) ? '"' . $memberFromName . '"' : $memberFromName . ' link=action=profile;u=' . $memberFromID . ' date=' . $time) . ']' . "\n" . un_htmlspecialchars($body) . '[/quote]';
 
 				//
 				// PM Attachments MOD BEGIN...
@@ -3654,7 +4187,9 @@ function ReportMessage()
 	}
 }
 
-// List all rules, and allow adding/entering etc....
+/**
+ * List all rules, and allow adding/entering etc...
+ */
 function ManageRules()
 {
 	global $txt, $context, $user_info, $scripturl, $smcFunc;
@@ -3679,7 +4214,7 @@ function ManageRules()
 
 	// Likely to need all the groups!
 	$request = $smcFunc['db_query']('', '
-		SELECT mg.id_group, mg.group_name, IFNULL(gm.id_member, 0) AS can_moderate, mg.hidden
+		SELECT mg.id_group, mg.group_name, COALESCE(gm.id_member, 0) AS can_moderate, mg.hidden
 		FROM {db_prefix}membergroups AS mg
 			LEFT JOIN {db_prefix}group_moderators AS gm ON (gm.id_group = mg.id_group AND gm.id_member = {int:current_member})
 		WHERE mg.min_posts = {int:min_posts}
@@ -3716,7 +4251,7 @@ function ManageRules()
 	// Editing a specific one?
 	if (isset($_GET['add']))
 	{
-		$context['rid'] = isset($_GET['rid']) && isset($context['rules'][$_GET['rid']])? (int) $_GET['rid'] : 0;
+		$context['rid'] = isset($_GET['rid']) && isset($context['rules'][$_GET['rid']]) ? (int) $_GET['rid'] : 0;
 		$context['sub_template'] = 'add_rule';
 
 		// Current rule information...
@@ -3756,8 +4291,8 @@ function ManageRules()
 	// Saving?
 	elseif (isset($_GET['save']))
 	{
-		checkSession('post');
-		$context['rid'] = isset($_GET['rid']) && isset($context['rules'][$_GET['rid']])? (int) $_GET['rid'] : 0;
+		checkSession();
+		$context['rid'] = isset($_GET['rid']) && isset($context['rules'][$_GET['rid']]) ? (int) $_GET['rid'] : 0;
 
 		// Name is easy!
 		$ruleName = $smcFunc['htmlspecialchars'](trim($_POST['rule_name']));
@@ -3797,7 +4332,10 @@ function ManageRules()
 					)
 				);
 				if ($smcFunc['db_num_rows']($request) == 0)
-					continue;
+				{
+					loadLanguage('Errors');
+					fatal_lang_error('invalid_username', false);
+				}
 				list ($memID) = $smcFunc['db_fetch_row']($request);
 				$smcFunc['db_free_result']($request);
 
@@ -3819,7 +4357,7 @@ function ManageRules()
 		foreach ($_POST['acttype'] as $ind => $type)
 		{
 			// Picking a valid label?
-			if ($type == 'lab' && (!ctype_digit((string) $ind) || !isset($_POST['labdef'][$ind]) || $_POST['labdef'][$ind] == '' || !isset($context['labels'][$_POST['labdef'][$ind] - 1])))
+			if ($type == 'lab' && (!ctype_digit((string) $ind) || !isset($_POST['labdef'][$ind]) || $_POST['labdef'][$ind] == '' || !isset($context['labels'][$_POST['labdef'][$ind]])))
 				continue;
 
 			// Too many actions in this rule.
@@ -3830,15 +4368,15 @@ function ManageRules()
 			if ($type == 'del')
 				$doDelete = 1;
 			elseif ($type == 'lab')
-				$actions[] = array('t' => 'lab', 'v' => (int) $_POST['labdef'][$ind] - 1);
+				$actions[] = array('t' => 'lab', 'v' => (int) $_POST['labdef'][$ind]);
 		}
 
 		if (empty($criteria) || (empty($actions) && !$doDelete))
 			fatal_lang_error('pm_rule_no_criteria', false);
 
 		// What are we storing?
-		$criteria = serialize($criteria);
-		$actions = serialize($actions);
+		$criteria = $smcFunc['json_encode']($criteria);
+		$actions = $smcFunc['json_encode']($actions);
 
 		// Create the rule?
 		if (empty($context['rid']))
@@ -3876,7 +4414,7 @@ function ManageRules()
 	// Deleting?
 	elseif (isset($_POST['delselected']) && !empty($_POST['delrule']))
 	{
-		checkSession('post');
+		checkSession();
 		$toDelete = array();
 		foreach ($_POST['delrule'] as $k => $v)
 			$toDelete[] = (int) $k;
@@ -3896,7 +4434,11 @@ function ManageRules()
 	}
 }
 
-// This will apply rules to all unread messages. If all_messages is set will, clearly, do it to all!
+/**
+ * This will apply rules to all unread messages. If all_messages is set will, clearly, do it to all!
+ *
+ * @param bool $all_messages Whether to apply this to all messages or just unread ones
+ */
 function ApplyRules($all_messages = false)
 {
 	global $user_info, $smcFunc, $context, $options;
@@ -3911,11 +4453,11 @@ function ApplyRules($all_messages = false)
 	// Just unread ones?
 	$ruleQuery = $all_messages ? '' : ' AND pmr.is_new = 1';
 
-	//!!! Apply all should have timeout protection!
+	// @todo Apply all should have timeout protection!
 	// Get all the messages that match this.
 	$request = $smcFunc['db_query']('', '
 		SELECT
-			pmr.id_pm, pm.id_member_from, pm.subject, pm.body, mem.id_group, pmr.labels
+			pmr.id_pm, pm.id_member_from, pm.subject, pm.body, mem.id_group
 		FROM {db_prefix}pm_recipients AS pmr
 			INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pmr.id_pm)
 			LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = pm.id_member_from)
@@ -3959,7 +4501,8 @@ function ApplyRules($all_messages = false)
 						{
 							// Get a basic pot started!
 							if (!isset($actions['labels'][$row['id_pm']]))
-								$actions['labels'][$row['id_pm']] = empty($row['labels']) ? array() : explode(',', $row['labels']);
+								$actions['labels'][$row['id_pm']] = array();
+
 							$actions['labels'][$row['id_pm']][] = $ruleAction['v'];
 						}
 					}
@@ -3981,25 +4524,42 @@ function ApplyRules($all_messages = false)
 			// Quickly check each label is valid!
 			$realLabels = array();
 			foreach ($context['labels'] as $label)
-				if (in_array($label['id'], $labels) && ($label['id'] != -1 || empty($options['pm_remove_inbox_label'])))
+				if (in_array($label['id'], $labels))
 					$realLabels[] = $label['id'];
 
-			$smcFunc['db_query']('', '
-				UPDATE {db_prefix}pm_recipients
-				SET labels = {string:new_labels}
-				WHERE id_pm = {int:id_pm}
-					AND id_member = {int:current_member}',
-				array(
-					'current_member' => $user_info['id'],
-					'id_pm' => $pm,
-					'new_labels' => empty($realLabels) ? '' : implode(',', $realLabels),
-				)
+			if (!empty($options['pm_remove_inbox_label']))
+				$smcFunc['db_query']('', '
+					UPDATE {db_prefix}pm_recipients
+					SET in_inbox = {int:in_inbox}
+					WHERE id_pm = {int:id_pm}
+						AND id_member = {int:current_member}',
+					array(
+						'in_inbox' => 0,
+						'id_pm' => $pm,
+						'current_member' => $user_info['id'],
+					)
+				);
+
+			$inserts = array();
+			// Now we insert the label info
+			foreach ($realLabels as $a_label)
+				$inserts[] = array($pm, $a_label);
+
+			$smcFunc['db_insert']('ignore',
+				'{db_prefix}pm_labeled_messages',
+				array('id_pm' => 'int', 'id_label' => 'int'),
+				$inserts,
+				array('id_pm', 'id_label')
 			);
 		}
 	}
 }
 
-// Load up all the rules for the current user.
+/**
+ * Load up all the rules for the current user.
+ *
+ * @param bool $reload Whether or not to reload all the rules from the database if $context['rules'] is set
+ */
 function LoadRules($reload = false)
 {
 	global $user_info, $context, $smcFunc;
@@ -4023,8 +4583,8 @@ function LoadRules($reload = false)
 		$context['rules'][$row['id_rule']] = array(
 			'id' => $row['id_rule'],
 			'name' => $row['rule_name'],
-			'criteria' => safe_unserialize($row['criteria']),
-			'actions' => safe_unserialize($row['actions']),
+			'criteria' => $smcFunc['json_decode']($row['criteria'], true),
+			'actions' => $smcFunc['json_decode']($row['actions'], true),
 			'delete' => $row['delete_pm'],
 			'logic' => $row['is_or'] ? 'or' : 'and',
 		);
@@ -4035,10 +4595,16 @@ function LoadRules($reload = false)
 	$smcFunc['db_free_result']($request);
 }
 
-// Check if the PM is available to the current user.
+/**
+ * Check if the PM is available to the current user.
+ *
+ * @param int $pmID The ID of the PM
+ * @param string $validFor Which folders this is valud for - can be 'inbox', 'outbox' or 'in_or_outbox'
+ * @return boolean Whether the PM is accessible in that folder for the current user
+ */
 function isAccessiblePM($pmID, $validFor = 'in_or_outbox')
 {
-	global $user_info, $smcFunc;
+	global $user_info, $smcFunc, $txt;
 
 	$request = $smcFunc['db_query']('', '
 		SELECT
@@ -4068,491 +4634,21 @@ function isAccessiblePM($pmID, $validFor = 'in_or_outbox')
 	{
 		case 'inbox':
 			return !empty($validationResult['valid_for_inbox']);
-		break;
+			break;
 
 		case 'outbox':
 			return !empty($validationResult['valid_for_outbox']);
-		break;
+			break;
 
 		case 'in_or_outbox':
 			return !empty($validationResult['valid_for_inbox']) || !empty($validationResult['valid_for_outbox']);
-		break;
+			break;
 
 		default:
-			trigger_error('Undefined validation type given', E_USER_ERROR);
-		break;
+			loadLanguage('Errors');
+			trigger_error($txt['pm_invalid_validation_type'], E_USER_ERROR);
+			break;
 	}
 }
-
-// get Individual user PM Attachment Downloads
-function userDownloads($id_pm, $id_attach, $id_user)
-{
-	global $smcFunc;
-
-	// How many downloads does this user have?
-	$request = $smcFunc['db_query']('', '
-		SELECT attachments, downloads
-		FROM {db_prefix}pm_recipients
-		WHERE id_pm = {int:id_pm}
-			AND id_member = {int:id_member}
-		LIMIT 1',
-		array(
-			'id_pm' => $id_pm,
-			'id_member' => $id_user,
-		)
-	);
-	list ($attach, $downs) = $smcFunc['db_fetch_row']($request);
-
-	$smcFunc['db_free_result']($request);
-
-	$pmr_attach = explode(',', $attach);
-	$pmr_downs = explode(',', $downs);
-
-	foreach ($pmr_attach as $key => $value) {
-		$attachint = intval($value);
-		
-		if ($attachint == $id_attach) // found attach id in here...														
-				$user_downloads = $pmr_downs[$key];
-	}
-	$pmr_attach = array_values($pmr_attach);
-	$pmr_downs = array_values($pmr_downs);
-
-	// Must be the user who sent it and is viewing their sent folder, let them see total downloads...
-	if (empty($user_downloads))
-	{
-		$request = $smcFunc['db_query']('', '
-			SELECT pa.downloads, pm.id_member_from
-			FROM {db_prefix}pm_attachments AS pa
-			INNER JOIN {db_prefix}personal_messages AS pm ON (pm.id_pm = pa.id_pm)
-			WHERE pa.id_attach = {int:id_attach}
-				AND pa.id_pm = {int:id_pm}
-				AND pa.attachment_type = {int:not_thumb}
-			LIMIT 1',
-			array(
-				'id_attach' => $id_attach,
-				'id_pm' => $id_pm,
-				'not_thumb' => 0,
-			)
-		);
-		list ($downloads, $member_from) = $smcFunc['db_fetch_row']($request);
-	
-		$smcFunc['db_free_result']($request);
-
-		if ($member_from == $id_user)
-			$user_downloads = $downloads;
-	}
-
-	if (empty($user_downloads))
-		$user_downloads = '0';
-
-	return $user_downloads;
-}
-
-
-
-// Download a PM attachment.
-function PMDownload()
-{
-	global $txt, $modSettings, $user_info, $scripturl, $context, $sourcedir, $smcFunc;
-
-	// No guests allowed!
-	is_not_guest();
-
-	// Make sure some attachment was requested!
-	if (!isset($_REQUEST['attach']) && !$user_info['is_admin'])
-		fatal_lang_error('no_access', false);
-		
-	$_REQUEST['pm'] = isset($_REQUEST['pm']) ? (int) $_REQUEST['pm'] : fatal_lang_error('no_access', false);
-
-	$_REQUEST['attach'] = isset($_REQUEST['attach']) ? (int) $_REQUEST['attach'] : fatal_lang_error('no_access', false);
-
-	isAllowedTo('pm_view_attachments');
-
-	// lets get the id_member_from first...
-	$request2 = $smcFunc['db_query']('', '
-		SELECT id_member_from
-		FROM {db_prefix}personal_messages
-		WHERE id_pm = {int:id_pm}',
-		array(
-			'id_pm' => $_REQUEST['pm'],
-		)
-	);
-
-	list ($member_from) = $smcFunc['db_fetch_row']($request2);
-	
-	$smcFunc['db_free_result']($request2);	
-	
-	$sent = !empty($member_from) && $user_info['id'] == $member_from ? 1 : 0;
-
-	// Make sure this attachment is in the PM!  Or was it reported?
-	$request = $smcFunc['db_query']('', '
-		SELECT pa.id_folder, pa.filename, pa.file_hash, pa.fileext, pa.id_attach, pa.attachment_type, pa.mime_type, pa.id_pm, pa.pm_report' . (empty($sent) ? ', pmr.attachments, pmr.downloads' : '') . '
-		FROM {db_prefix}pm_attachments AS pa
-			INNER JOIN {db_prefix}personal_messages AS pm ON ((pm.id_pm = pa.pm_report) OR (pm.id_pm = pa.id_pm'
-			 . (!empty($sent) ? ' AND pm.id_member_from = {int:id_member}))' : ')) INNER JOIN {db_prefix}pm_recipients AS pmr ON (((pmr.id_pm = pa.id_pm) OR (pmr.id_pm = pa.pm_report)) AND pmr.id_member = {int:id_member})') . '
-		WHERE pa.id_attach = {int:attach}',
-		array(
-			'attach' => $_REQUEST['attach'],
-			'id_member' => empty($sent) ? $user_info['id'] : $member_from,
-			'id_pm_report' => $_REQUEST['pm'],
-		)
-	);
-
-	if ($smcFunc['db_num_rows']($request) == 0)
-		fatal_lang_error('no_access', false);
-
-
-if (empty($sent))
-	list ($id_folder, $real_filename, $file_hash, $file_ext, $id_attach, $attachment_type, $mime_type, $id_pm, $id_pm_report, $pmrattachments, $pmrdownloads) = $smcFunc['db_fetch_row']($request);
-else
-	list ($id_folder, $real_filename, $file_hash, $file_ext, $id_attach, $attachment_type, $mime_type, $id_pm, $id_pm_report) = $smcFunc['db_fetch_row']($request);
-	
-	$smcFunc['db_free_result']($request);
-	
-	// Update the download counters (unless it's a thumbnail).
-	if ($attachment_type != 3) {
-		// Main download counter
-		$smcFunc['db_query']('attach_download_increase', '
-			UPDATE LOW_PRIORITY {db_prefix}pm_attachments
-			SET downloads = downloads + 1
-			WHERE id_attach = {int:id_attach}',
-			array(
-				'id_attach' => $id_attach,
-			)
-		);
-		
-
-		// Update the Individual download counter if not downloading attachments through sent folder ofcourse...
-		if (empty($sent)) 
-		{
-			$pmr_attach = explode(',', $pmrattachments);
-			$pmr_downs = explode(',', $pmrdownloads);
-			
-			// which 1 is it?
-			foreach ($pmr_attach as $key => $value) {
-				$attachint = intval($value);				
-				if ($attachint == $id_attach) // found attach id in here...														
-						$pmr_downs[$key] = $pmr_downs[$key]+1;
-			}
-			
-			$smcFunc['db_query']('', '
-			UPDATE LOW_PRIORITY {db_prefix}pm_recipients
-				SET downloads = {string:downs}
-				WHERE id_pm = {int:id_pm} AND
-				id_member = {int:id_member}',
-				array(
-					'downs' => implode(',', $pmr_downs),
-					'id_pm' => !empty($id_pm_report) ? $id_pm_report : $id_pm,
-					'id_member' => $user_info['id'],
-				)
-			);
-		}
-
-	}
-	
-	$filename = getPMAttachmentFilename($real_filename, $_REQUEST['attach'], $id_folder, false, $file_hash);
-
-	// This is done to clear any output that was made before now. (would use ob_clean(), but that's PHP 4.2.0+...)
-	ob_end_clean();
-	if (!empty($modSettings['enableCompressedOutput']) && @version_compare(PHP_VERSION, '4.2.0') >= 0 && @filesize($filename) <= 4194304)
-		@ob_start('ob_gzhandler');
-	else
-	{
-		ob_start();
-		header('Content-Encoding: none');
-	}
-
-	// No point in a nicer message, because this is supposed to be an attachment anyway...
-	if (!file_exists($filename))
-	{
-		loadLanguage('Errors');
-
-		header('HTTP/1.0 404 ' . $txt['attachment_not_found']);
-		header('Content-Type: text/plain; charset=' . (empty($context['character_set']) ? 'ISO-8859-1' : $context['character_set']));
-
-		// We need to die like this *before* we send any anti-caching headers as below.
-		die('404 - ' . $txt['attachment_not_found']);
-	}
-
-	// If it hasn't been modified since the last time this attachement was retrieved, there's no need to display it again.
-	if (!empty($_SERVER['HTTP_IF_MODIFIED_SINCE']))
-	{
-		list($modified_since) = explode(';', $_SERVER['HTTP_IF_MODIFIED_SINCE']);
-		if (strtotime($modified_since) >= filemtime($filename))
-		{
-			ob_end_clean();
-
-			// Answer the question - no, it hasn't been modified ;).
-			header('HTTP/1.1 304 Not Modified');
-			exit;
-		}
-	}
-
-	// Check whether the ETag was sent back, and cache based on that...
-	$file_md5 = '"' . md5_file($filename) . '"';
-	if (!empty($_SERVER['HTTP_IF_NONE_MATCH']) && strpos($_SERVER['HTTP_IF_NONE_MATCH'], $file_md5) !== false)
-	{
-		ob_end_clean();
-
-		header('HTTP/1.1 304 Not Modified');
-		exit;
-	}
-
-	// Send the attachment headers.
-	header('Pragma: ');
-	if (!$context['browser']['is_gecko'])
-		header('Content-Transfer-Encoding: binary');
-	header('Expires: ' . gmdate('D, d M Y H:i:s', time() + 525600 * 60) . ' GMT');
-	header('Last-Modified: ' . gmdate('D, d M Y H:i:s', filemtime($filename)) . ' GMT');
-	header('Accept-Ranges: bytes');
-	header('Connection: close');
-	header('ETag: ' . $file_md5);
-
-	// Does this have a mime type?
-	if ($mime_type && (isset($_REQUEST['image']) || !in_array($file_ext, array('jpg', 'gif', 'jpeg', 'x-ms-bmp', 'png', 'psd', 'tiff', 'iff'))))
-		header('Content-Type: ' . $mime_type);
-	else
-	{
-		header('Content-Type: ' . ($context['browser']['is_ie'] || $context['browser']['is_opera'] ? 'application/octetstream' : 'application/octet-stream'));
-		if (isset($_REQUEST['image']))
-			unset($_REQUEST['image']);
-	}
-
-	if (!isset($_REQUEST['image']))
-	{
-		// Convert the file to UTF-8, cuz most browsers dig that.
-		$utf8name = !$context['utf8'] && function_exists('iconv') ? iconv($context['character_set'], 'UTF-8', $real_filename) : (!$context['utf8'] && function_exists('mb_convert_encoding') ? mb_convert_encoding($real_filename, 'UTF-8', $context['character_set']) : $real_filename);
-		$fixchar = function($n)
-    {
-      if ($n < 32)
-				return '';
-			elseif ($n < 128)
-				return chr($n);
-			elseif ($n < 2048)
-				return chr(192 | $n >> 6) . chr(128 | $n & 63);
-			elseif ($n < 65536)
-				return chr(224 | $n >> 12) . chr(128 | $n >> 6 & 63) . chr(128 | $n & 63);
-			else
-				return chr(240 | $n >> 18) . chr(128 | $n >> 12 & 63) . chr(128 | $n >> 6 & 63) . chr(128 | $n & 63);
-    };
-
-		$disposition = !isset($_REQUEST['image']) ? 'attachment' : 'inline';
-
-        // Different browsers like different standards...
-		if ($context['browser']['is_firefox'])
-			header('Content-Disposition: ' . $disposition . '; filename*=UTF-8\'\'' . rawurlencode(preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name)));
-
-		elseif ($context['browser']['is_opera'])
-			header('Content-Disposition: ' . $disposition . '; filename="' . preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name) . '"');
-
-		elseif ($context['browser']['is_ie'])
-			header('Content-Disposition: ' . $disposition . '; filename="' . urlencode(preg_replace_callback('~&#(\d{3,8});~', 'fixchar__callback', $utf8name)) . '"');
-
-		else
-			header('Content-Disposition: ' . $disposition . '; filename="' . $utf8name . '"');
-	}
-
-	// If this has an "image extension" - but isn't actually an image - then ensure it isn't cached cause of silly IE.
-	if (!isset($_REQUEST['image']) && in_array($file_ext, array('gif', 'jpg', 'bmp', 'png', 'jpeg', 'tiff')))
-		header('Cache-Control: no-cache');
-	else
-		header('Cache-Control: max-age=' . (525600 * 60) . ', private');
-
-	if (empty($modSettings['enableCompressedOutput']) || filesize($filename) > 4194304)
-		header('Content-Length: ' . filesize($filename));
-
-	// Try to buy some time...
-	@set_time_limit(0);
-
-	// For text files.....
-	/* if (!isset($_REQUEST['image']) && in_array($file_ext, array('txt', 'css', 'htm', 'html', 'php', 'xml')))
-	{
-		// We need to check this isn't unicode before we start messing around with it!
-		$fp = fopen($filename, 'rb');
-		$header = fread($fp, 2);
-		fclose($fp);
-
-		if ($header != chr(255).chr(254) && $header != chr(254).chr(255))
-		{
-			if (strpos($_SERVER['HTTP_USER_AGENT'], 'Windows') !== false)
-				$callback = create_function('$buffer', 'return preg_replace(\'~[\r]?\n~\', "\r\n", $buffer);');
-			elseif (strpos($_SERVER['HTTP_USER_AGENT'], 'Mac') !== false)
-				$callback = create_function('$buffer', 'return preg_replace(\'~[\r]?\n~\', "\r", $buffer);');
-			else
-				$callback = create_function('$buffer', 'return preg_replace(\'~\r~\', "\r\n", $buffer);');
-		}
-	} */
-
-	// Since we don't do output compression for files this large...
-	if (filesize($filename) > 4194304)
-	{
-		// Forcibly end any output buffering going on.
-		if (function_exists('ob_get_level'))
-		{
-			while (@ob_get_level() > 0)
-				@ob_end_clean();
-		}
-		else
-		{
-			@ob_end_clean();
-			@ob_end_clean();
-			@ob_end_clean();
-		}
-
-		$fp = fopen($filename, 'rb');
-		while (!feof($fp))
-		{
-			if (isset($callback))
-				echo $callback(fread($fp, 8192));
-			else
-				echo fread($fp, 8192);
-			flush();
-		}
-		fclose($fp);
-	}
-	// On some of the less-bright hosts, readfile() is disabled.  It's just a faster, more byte safe, version of what's in the if.
-	elseif (isset($callback) || @readfile($filename) == null)
-		echo isset($callback) ? $callback(file_get_contents($filename)) : file_get_contents($filename);
-
-	obExit(false);
-
-}
-
-function loadPMAttachmentContext($id_pm)
-{
-	global $attachments, $modSettings, $txt, $scripturl, $sourcedir, $smcFunc, $user_info, $attachmentData;
-
-	// Set up the attachment info - based on code by Meriadoc.
-	$attachmentData = array();
-
-	if (isset($attachments[$id_pm]) && !empty($modSettings['pmAttachmentEnable']))
-	{
-		foreach ($attachments[$id_pm] as $i => $attachment)
-		{
-			$attachmentData[$i] = array(
-				'id' => $attachment['id_attach'],
-				'name' => preg_replace('~&amp;#(\\d{1,7}|x[0-9a-fA-F]{1,6});~', '&#\\1;', htmlspecialchars($attachment['filename'])),
-				'downloads' => userDownloads($id_pm, $attachment['id_attach'], $user_info['id']),
-				'size' => round($attachment['filesize'] / 1024, 2) . ' ' . $txt['kilobyte'],
-				'byte_size' => $attachment['filesize'],
-				'href' => $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachment['id_attach'],
-				'link' => '<a href="' . $scripturl . '?action=dlattach;pm=' . $id_pm . ';attach=' . $attachment['id_attach'] . '">' . htmlspecialchars($attachment['filename']) . '</a>',
-				'is_image' => !empty($attachment['width']) && !empty($attachment['height']) && !empty($modSettings['pmAttachmentShowImages']),
-			);
-
-			if (!$attachmentData[$i]['is_image'])
-				continue;
-
-			$attachmentData[$i]['real_width'] = $attachment['width'];
-			$attachmentData[$i]['width'] = $attachment['width'];
-			$attachmentData[$i]['real_height'] = $attachment['height'];
-			$attachmentData[$i]['height'] = $attachment['height'];
-
-			// Let's see, do we want thumbs?
-			if (!empty($modSettings['pmAttachmentThumbnails']) && !empty($modSettings['pmAttachmentThumbWidth']) && !empty($modSettings['pmAttachmentThumbHeight']) && ($attachment['width'] > $modSettings['pmAttachmentThumbWidth'] || $attachment['height'] > $modSettings['pmAttachmentThumbHeight']) && strlen($attachment['filename']) < 249)
-			{
-				// A proper thumb doesn't exist yet? Create one!
-				if (empty($attachment['id_thumb']) || $attachment['thumb_width'] > $modSettings['pmAttachmentThumbWidth'] || $attachment['thumb_height'] > $modSettings['pmAttachmentThumbHeight'] || ($attachment['thumb_width'] < $modSettings['pmAttachmentThumbWidth'] && $attachment['thumb_height'] < $modSettings['pmAttachmentThumbHeight']))
-				{
-					$filename = getPMAttachmentFilename($attachment['filename'], $attachment['id_attach'], $attachment['id_folder']);
-
-					require_once($sourcedir . '/Subs-Graphics.php');
-					if (createThumbnail($filename, $modSettings['pmAttachmentThumbWidth'], $modSettings['pmAttachmentThumbHeight']))
-					{
-						// So what folder are we putting this image in?
-						if (!empty($modSettings['pmCurrentAttachmentUploadDir']))
-						{
-							if (!is_array($modSettings['pmAttachmentUploadDir']))
-								$modSettings['pmAttachmentUploadDir'] = @unserialize($modSettings['pmAttachmentUploadDir']);
-							$path = $modSettings['pmAttachmentUploadDir'][$modSettings['pmCurrentAttachmentUploadDir']];
-							$id_folder_thumb = $modSettings['pmCurrentAttachmentUploadDir'];
-						}
-						else
-						{
-							$path = $modSettings['pmAttachmentUploadDir'];
-							$id_folder_thumb = 1;
-						}
-
-						// Calculate the size of the created thumbnail.
-						list ($attachment['thumb_width'], $attachment['thumb_height']) = @getimagesize($filename . '_thumb');
-						$thumb_size = filesize($filename . '_thumb');
-
-						$thumb_filename = $attachment['filename'] . '_thumb';
-						$thumb_hash = getPMAttachmentFilename($thumb_filename, false, null, true);
-
-						// Add this beauty to the database.
-						$smcFunc['db_insert']('',
-							'{db_prefix}pm_attachments',
-	// Does this have a mime type?
-							array('id_folder' => 'int', 'id_pm' => 'int', 'attachment_type' => 'int', 'filename' => 'string', 'file_hash' => 'string', 'size' => 'int', 'width' => 'int', 'height' => 'int'),
-							array($id_folder_thumb, $id_pm, 3, $thumb_filename, $thumb_hash, (int) $thumb_size, (int) $attachment['thumb_width'], (int) $attachment['thumb_height']),
-							array('id_attach')
-						);
-						$attachment['id_thumb'] = $smcFunc['db_insert_id']('{db_prefix}pm_attachments', 'id_attach');
-						if (!empty($attachment['id_thumb']))
-						{
-							$smcFunc['db_query']('', '
-								UPDATE {db_prefix}pm_attachments
-								SET id_thumb = {int:id_thumb}
-								WHERE id_attach = {int:id_attach}',
-								array(
-									'id_thumb' => $attachment['id_thumb'],
-									'id_attach' => $attachment['id_attach'],
-								)
-							);
-
-	// Does this have a mime type?
-							$thumb_realname = getPMAttachmentFilename($thumb_filename, $attachment['id_thumb'], $id_folder_thumb, false, $thumb_hash);
-							rename($filename . '_thumb', $thumb_realname);
-						}
-					}
-				}
-
-				// Only adjust dimensions on successful thumbnail creation.
-				if (!empty($attachment['thumb_width']) && !empty($attachment['thumb_height']))
-				{
-					$attachmentData[$i]['width'] = $attachment['thumb_width'];
-					$attachmentData[$i]['height'] = $attachment['thumb_height'];
-				}
-			}
-
-			if (!empty($attachment['id_thumb']))
-				$attachmentData[$i]['thumbnail'] = array(
-					'id' => $attachment['id_thumb'],
-					'href' => $scripturl . '?action=dlpmattach;pm=' . $id_pm . ';attach=' . $attachment['id_thumb'] . ';image',
-				);
-			$attachmentData[$i]['thumbnail']['has_thumb'] = !empty($attachment['id_thumb']);
-
-			// If thumbnails are disabled, check the maximum size of the image.
-			if (!$attachmentData[$i]['thumbnail']['has_thumb'] && ((!empty($modSettings['max_image_width']) && $attachment['width'] > $modSettings['max_image_width']) || (!empty($modSettings['max_image_height']) && $attachment['height'] > $modSettings['max_image_height'])))
-			{
-				if (!empty($modSettings['max_image_width']) && (empty($modSettings['max_image_height']) || $attachment['height'] * $modSettings['max_image_width'] / $attachment['width'] <= $modSettings['max_image_height']))
-				{
-					$attachmentData[$i]['width'] = $modSettings['max_image_width'];
-					$attachmentData[$i]['height'] = floor($attachment['height'] * $modSettings['max_image_width'] / $attachment['width']);
-				}
-				elseif (!empty($modSettings['max_image_width']))
-				{
-					$attachmentData[$i]['width'] = floor($attachment['width'] * $modSettings['max_image_height'] / $attachment['height']);
-					$attachmentData[$i]['height'] = $modSettings['max_image_height'];
-				}
-			}
-			elseif ($attachmentData[$i]['thumbnail']['has_thumb'])
-			{
-				// If the image is too large to show inline, make it a popup.
-				if (((!empty($modSettings['max_image_width']) && $attachmentData[$i]['real_width'] > $modSettings['max_image_width']) || (!empty($modSettings['max_image_height']) && $attachmentData[$i]['real_height'] > $modSettings['max_image_height'])))
-					$attachmentData[$i]['thumbnail']['javascript'] = 'return reqWin(\'' . $attachmentData[$i]['href'] . ';image\', ' . ($attachment['width'] + 20) . ', ' . ($attachment['height'] + 20) . ', true);';
-				else
-					$attachmentData[$i]['thumbnail']['javascript'] = 'return expandThumb(' . $attachment['id_attach'] . ');';
-			}
-
-			if (!$attachmentData[$i]['thumbnail']['has_thumb'])
-				$attachmentData[$i]['downloads']++;
-		}
-	}
-
-	return $attachmentData;
-}
-
 
 ?>

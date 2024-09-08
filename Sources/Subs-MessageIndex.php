@@ -4,22 +4,32 @@
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0
+ * @version 2.1.2
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
+/**
+ * Generates the query to determine the list of available boards for a user
+ * Executes the query and returns the list
+ *
+ * @param array $boardListOptions An array of options for the board list
+ * @return array An array of board info
+ */
 function getBoardList($boardListOptions = array())
 {
-	global $smcFunc, $user_info;
+	global $smcFunc, $sourcedir, $txt;
 
 	if (isset($boardListOptions['excluded_boards']) && isset($boardListOptions['included_boards']))
-		trigger_error('getBoardList(): Setting both excluded_boards and included_boards is not allowed.', E_USER_ERROR);
+	{
+		loadLanguage('Errors');
+		trigger_error($txt['get_board_list_cannot_include_and_exclude'], E_USER_ERROR);
+	}
 
 	$where = array();
 	$where_parameters = array();
@@ -47,8 +57,8 @@ function getBoardList($boardListOptions = array())
 		$where_parameters['blank_redirect'] = '';
 	}
 
-	$request = $smcFunc['db_query']('messageindex_fetch_boards', '
-		SELECT c.name AS cat_name, c.id_cat, b.id_board, b.name AS board_name, b.child_level
+	$request = $smcFunc['db_query']('order_by_board_order', '
+		SELECT c.name AS cat_name, c.id_cat, b.id_board, b.name AS board_name, b.child_level, b.redirect
 		FROM {db_prefix}boards AS b
 			LEFT JOIN {db_prefix}categories AS c ON (c.id_cat = b.id_cat)' . (empty($where) ? '' : '
 		WHERE ' . implode('
@@ -68,15 +78,19 @@ function getBoardList($boardListOptions = array())
 					'boards' => array(),
 				);
 
-			$return_value[$row['id_cat']]['boards'][] = array(
+			$return_value[$row['id_cat']]['boards'][$row['id_board']] = array(
 				'id' => $row['id_board'],
 				'name' => $row['board_name'],
 				'child_level' => $row['child_level'],
+				'redirect' => $row['redirect'],
 				'selected' => isset($boardListOptions['selected_board']) && $boardListOptions['selected_board'] == $row['id_board'],
 			);
 		}
 	}
 	$smcFunc['db_free_result']($request);
+
+	require_once($sourcedir . '/Subs-Boards.php');
+	sortCategories($return_value);
 
 	return $return_value;
 }

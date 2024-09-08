@@ -1,83 +1,28 @@
 <?php
 
 /**
+ * This file is mainly concerned with minor tasks relating to boards, such as
+ * marking them read, collapsing categories, or quick moderation.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2023 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.15
+ * @version 2.1.4
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file is mainly concerned with minor tasks relating to boards, such as
-	marking them read, collapsing categories, or quick moderation.  It defines
-	the following list of functions:
-
-	void markBoardsRead(array boards)
-		// !!!
-
-	void MarkRead()
-		// !!!
-
-	int getMsgMemberID(int id_msg)
-		// !!!
-
-	void modifyBoard(int board_id, array boardOptions)
-		- general function to modify the settings and position of a board.
-		- used by ManageBoards.php to change the settings of a board.
-
-	int createBoard(array boardOptions)
-		- general function to create a new board and set its position.
-		- allows (almost) the same options as the modifyBoard() function.
-		- with the option inherit_permissions set, the parent board permissions
-		  will be inherited.
-		- returns the ID of the newly created board.
-
-	void deleteBoards(array boards_to_remove, moveChildrenTo = null)
-		- general function to delete one or more boards.
-		- allows to move the children of the board before deleting it
-		- if moveChildrenTo is set to null, the child boards will be deleted.
-		- deletes all topics that are on the given boards.
-		- deletes all information that's associated with the given boards.
-		- updates the statistics to reflect the new situation.
-
-	void reorderBoards()
-		- updates the database to put all boards in the right order.
-		- sorts the records of the boards table.
-		- used by modifyBoard(), deleteBoards(), modifyCategory(), and
-		  deleteCategories() functions.
-
-	void fixChildren(int parent, int newLevel, int newParent)
-		- recursively updates the children of parent's child_level and
-		  id_parent to newLevel and newParent.
-		- used when a board is deleted or moved, to affect its children.
-
-	bool isChildOf(int child, int parent)
-		- determines if child is a child of parent.
-		- recurses down the tree until there are no more parents.
-		- returns true if child is a child of parent.
-
-	void getBoardTree()
-		- load information regarding the boards and categories.
-		- the information retrieved is stored in globals:
-			- $boards		properties of each board.
-			- $boardList	a list of boards grouped by category ID.
-			- $cat_tree		properties of each category.
-
-	void recursiveBoards()
-		- function used by getBoardTree to recursively get a list of boards.
-
-	bool isChildOf(int child, int parent)
-		- determine if a certain board id is a child of another board.
-		- the parent might be several levels higher than the child.
-*/
-
-// Mark a board or multiple boards read.
+/**
+ * Mark a board or multiple boards read.
+ *
+ * @param int|array $boards The ID of a single board or an array of boards
+ * @param bool $unread Whether we're marking them as unread
+ */
 function markBoardsRead($boards, $unread = false)
 {
 	global $user_info, $modSettings, $smcFunc;
@@ -96,7 +41,7 @@ function markBoardsRead($boards, $unread = false)
 	if ($unread)
 	{
 		// Clear out all the places where this lovely info is stored.
-		// !! Maybe not log_mark_read?
+		// @todo Maybe not log_mark_read?
 		$smcFunc['db_query']('', '
 			DELETE FROM {db_prefix}log_mark_read
 			WHERE id_board IN ({array_int:board_list})
@@ -140,6 +85,9 @@ function markBoardsRead($boards, $unread = false)
 	}
 
 	// Get rid of useless log_topics data, because log_mark_read is better for it - even if marking unread - I think so...
+	// @todo look at this...
+	// The call to markBoardsRead() in Display() used to be simply
+	// marking log_boards (the previous query only)
 	$result = $smcFunc['db_query']('', '
 		SELECT MIN(id_topic)
 		FROM {db_prefix}log_topics
@@ -154,14 +102,15 @@ function markBoardsRead($boards, $unread = false)
 	if (empty($lowest_topic))
 		return;
 
-	// !!!SLOW This query seems to eat it sometimes.
+	// @todo SLOW This query seems to eat it sometimes.
 	$result = $smcFunc['db_query']('', '
 		SELECT lt.id_topic
 		FROM {db_prefix}log_topics AS lt
 			INNER JOIN {db_prefix}topics AS t /*!40000 USE INDEX (PRIMARY) */ ON (t.id_topic = lt.id_topic
 				AND t.id_board IN ({array_int:board_list}))
 		WHERE lt.id_member = {int:current_member}
-			AND lt.id_topic >= {int:lowest_topic}',
+			AND lt.id_topic >= {int:lowest_topic}
+			AND lt.unwatched != 1',
 		array(
 			'current_member' => $user_info['id'],
 			'board_list' => $boards,
@@ -185,7 +134,9 @@ function markBoardsRead($boards, $unread = false)
 		);
 }
 
-// Mark one or more boards as read.
+/**
+ * Mark one or more boards as read.
+ */
 function MarkRead()
 {
 	global $board, $topic, $user_info, $board_info, $modSettings, $smcFunc;
@@ -224,16 +175,31 @@ function MarkRead()
 	}
 	elseif (isset($_REQUEST['sa']) && $_REQUEST['sa'] == 'unreadreplies')
 	{
-		// Make sure all the boards are integers!
-		$topics = explode('-', $_REQUEST['topics']);
+		// Make sure all the topics are integers!
+		$topics = array_map('intval', explode('-', $_REQUEST['topics']));
+
+		$request = $smcFunc['db_query']('', '
+			SELECT id_topic, unwatched
+			FROM {db_prefix}log_topics
+			WHERE id_topic IN ({array_int:selected_topics})
+				AND id_member = {int:current_user}',
+			array(
+				'selected_topics' => $topics,
+				'current_user' => $user_info['id'],
+			)
+		);
+		$logged_topics = array();
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+			$logged_topics[$row['id_topic']] = $row['unwatched'];
+		$smcFunc['db_free_result']($request);
 
 		$markRead = array();
 		foreach ($topics as $id_topic)
-			$markRead[] = array($modSettings['maxMsgID'], $user_info['id'], (int) $id_topic);
+			$markRead[] = array($modSettings['maxMsgID'], $user_info['id'], $id_topic, (isset($logged_topics[$topic]) ? $logged_topics[$topic] : 0));
 
 		$smcFunc['db_insert']('replace',
 			'{db_prefix}log_topics',
-			array('id_msg' => 'int', 'id_member' => 'int', 'id_topic' => 'int'),
+			array('id_msg' => 'int', 'id_member' => 'int', 'id_topic' => 'int', 'unwatched' => 'int'),
 			$markRead,
 			array('id_member', 'id_topic')
 		);
@@ -249,11 +215,13 @@ function MarkRead()
 	{
 		// First, let's figure out what the latest message is.
 		$result = $smcFunc['db_query']('', '
-			SELECT id_first_msg, id_last_msg
-			FROM {db_prefix}topics
-			WHERE id_topic = {int:current_topic}',
+			SELECT t.id_first_msg, t.id_last_msg, COALESCE(lt.unwatched, 0) as unwatched
+			FROM {db_prefix}topics as t
+				LEFT JOIN {db_prefix}log_topics as lt ON (lt.id_topic = t.id_topic AND lt.id_member = {int:current_member})
+			WHERE t.id_topic = {int:current_topic}',
 			array(
 				'current_topic' => $topic,
+				'current_member' => $user_info['id'],
 			)
 		);
 		$topicinfo = $smcFunc['db_fetch_assoc']($result);
@@ -296,9 +264,10 @@ function MarkRead()
 				FROM {db_prefix}messages
 				WHERE id_topic = {int:current_topic}
 				ORDER BY id_msg
-				LIMIT ' . (int) $_REQUEST['start'] . ', 1',
+				LIMIT {int:start}, 1',
 				array(
 					'current_topic' => $topic,
+					'start' => (int) $_REQUEST['start'],
 				)
 			);
 			list ($earlyMsg) = $smcFunc['db_fetch_row']($result);
@@ -310,8 +279,8 @@ function MarkRead()
 		// Blam, unread!
 		$smcFunc['db_insert']('replace',
 			'{db_prefix}log_topics',
-			array('id_msg' => 'int', 'id_member' => 'int', 'id_topic' => 'int'),
-			array($earlyMsg, $user_info['id'], $topic),
+			array('id_msg' => 'int', 'id_member' => 'int', 'id_topic' => 'int', 'unwatched' => 'int'),
+			array($earlyMsg, $user_info['id'], $topic, $topicinfo['unwatched']),
 			array('id_member', 'id_topic')
 		);
 
@@ -340,7 +309,7 @@ function MarkRead()
 		if (isset($_REQUEST['children']) && !empty($boards))
 		{
 			// They want to mark the entire tree starting with the boards specified
-			// The easist thing is to just get all the boards they can see, but since we've specified the top of tree we ignore some of them
+			// The easiest thing is to just get all the boards they can see, but since we've specified the top of tree we ignore some of them
 
 			$request = $smcFunc['db_query']('', '
 				SELECT b.id_board, b.id_parent
@@ -348,8 +317,7 @@ function MarkRead()
 				WHERE {query_see_board}
 					AND b.child_level > {int:no_parents}
 					AND b.id_board NOT IN ({array_int:board_list})
-				ORDER BY child_level ASC
-				',
+				ORDER BY child_level ASC',
 				array(
 					'no_parents' => 0,
 					'board_list' => $boards,
@@ -358,6 +326,7 @@ function MarkRead()
 			while ($row = $smcFunc['db_fetch_assoc']($request))
 				if (in_array($row['id_parent'], $boards))
 					$boards[] = $row['id_board'];
+
 			$smcFunc['db_free_result']($request);
 		}
 
@@ -443,14 +412,19 @@ function MarkRead()
 	}
 }
 
-// Get the id_member associated with the specified message.
+/**
+ * Get the id_member associated with the specified message.
+ *
+ * @param int $messageID The ID of the message
+ * @return int The ID of the member associated with that post
+ */
 function getMsgMemberID($messageID)
 {
 	global $smcFunc;
 
 	// Find the topic and make sure the member still exists.
 	$result = $smcFunc['db_query']('', '
-		SELECT IFNULL(mem.id_member, 0)
+		SELECT COALESCE(mem.id_member, 0)
 		FROM {db_prefix}messages AS m
 			LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = m.id_member)
 		WHERE m.id_msg = {int:selected_message}
@@ -464,15 +438,22 @@ function getMsgMemberID($messageID)
 	// The message doesn't even exist.
 	else
 		$memberID = 0;
+
 	$smcFunc['db_free_result']($result);
 
 	return (int) $memberID;
 }
 
-// Modify the settings and position of a board.
+/**
+ * Modify the settings and position of a board.
+ * Used by ManageBoards.php to change the settings of a board.
+ *
+ * @param int $board_id The ID of the board
+ * @param array &$boardOptions An array of options related to the board
+ */
 function modifyBoard($board_id, &$boardOptions)
 {
-	global $sourcedir, $cat_tree, $boards, $boardList, $modSettings, $smcFunc;
+	global $cat_tree, $boards, $smcFunc, $context, $txt;
 
 	// Get some basic information about all boards and categories.
 	getBoardTree();
@@ -480,6 +461,9 @@ function modifyBoard($board_id, &$boardOptions)
 	// Make sure given boards and categories exist.
 	if (!isset($boards[$board_id]) || (isset($boardOptions['target_board']) && !isset($boards[$boardOptions['target_board']])) || (isset($boardOptions['target_category']) && !isset($cat_tree[$boardOptions['target_category']])))
 		fatal_lang_error('no_board');
+
+	$id = $board_id;
+	call_integration_hook('integrate_pre_modify_board', array($id, &$boardOptions));
 
 	// All things that will be updated in the database will be in $boardUpdates.
 	$boardUpdates = array();
@@ -518,6 +502,7 @@ function modifyBoard($board_id, &$boardOptions)
 			// People can be creative, in many ways...
 			if (isChildOf($id_parent, $board_id))
 				fatal_lang_error('mboards_parent_own_child_error', false);
+
 			elseif ($id_parent == $board_id)
 				fatal_lang_error('mboards_board_own_child_error', false);
 
@@ -540,7 +525,10 @@ function modifyBoard($board_id, &$boardOptions)
 
 		// Oops...?
 		else
-			trigger_error('modifyBoard(): The move_to value \'' . $boardOptions['move_to'] . '\' is incorrect', E_USER_ERROR);
+		{
+			loadLanguage('Errors');
+			trigger_error(sprintf($txt['modify_board_incorrect_move_to'], $boardOptions['move_to']), E_USER_ERROR);
+		}
 
 		// Get a list of children of this board.
 		$childList = array();
@@ -549,8 +537,10 @@ function modifyBoard($board_id, &$boardOptions)
 		// See if there are changes that affect children.
 		$childUpdates = array();
 		$levelDiff = $child_level - $boards[$board_id]['level'];
+
 		if ($levelDiff != 0)
 			$childUpdates[] = 'child_level = child_level ' . ($levelDiff > 0 ? '+ ' : '') . '{int:level_diff}';
+
 		if ($id_cat != $boards[$board_id]['category'])
 			$childUpdates[] = 'id_cat = {int:category}';
 
@@ -615,10 +605,24 @@ function modifyBoard($board_id, &$boardOptions)
 	}
 
 	// Who's allowed to access this board.
+	$board_permissions_inserts = array();
 	if (isset($boardOptions['access_groups']))
 	{
+		foreach ($boardOptions['access_groups'] as $value)
+			$board_permissions_inserts[] = array($value, $board_id, 0);
+
 		$boardUpdates[] = 'member_groups = {string:member_groups}';
 		$boardUpdateParameters['member_groups'] = implode(',', $boardOptions['access_groups']);
+	}
+
+	// And who isn't.
+	if (isset($boardOptions['deny_groups']))
+	{
+		foreach ($boardOptions['deny_groups'] as $value)
+			$board_permissions_inserts[] = array($value, $board_id, 1);
+
+		$boardUpdates[] = 'deny_member_groups = {string:deny_groups}';
+		$boardUpdateParameters['deny_groups'] = implode(',', $boardOptions['deny_groups']);
 	}
 
 	if (isset($boardOptions['board_name']))
@@ -651,9 +655,12 @@ function modifyBoard($board_id, &$boardOptions)
 		$boardUpdateParameters['num_posts'] = (int) $boardOptions['num_posts'];
 	}
 
+	$id = $board_id;
+	call_integration_hook('integrate_modify_board', array($id, $boardOptions, &$boardUpdates, &$boardUpdateParameters));
+
 	// Do the updates (if any).
 	if (!empty($boardUpdates))
-		$request = $smcFunc['db_query']('', '
+		$smcFunc['db_query']('', '
 			UPDATE {db_prefix}boards
 			SET
 				' . implode(',
@@ -664,8 +671,25 @@ function modifyBoard($board_id, &$boardOptions)
 			))
 		);
 
+	// Before we add new access_groups or deny_groups, remove all of the old entries
+	$smcFunc['db_query']('', '
+		DELETE FROM {db_prefix}board_permissions_view
+		WHERE id_board = {int:selected_board}',
+		array(
+			'selected_board' => $board_id,
+		)
+	);
+
+	if ($board_permissions_inserts != array())
+		$smcFunc['db_insert']('insert',
+			'{db_prefix}board_permissions_view',
+			array('id_group' => 'int', 'id_board' => 'int', 'deny' => 'int'),
+			$board_permissions_inserts,
+			array('id_group', 'id_board', 'deny')
+		);
+
 	// Set moderators of this board.
-	if (isset($boardOptions['moderators']) || isset($boardOptions['moderator_string']))
+	if (isset($boardOptions['moderators']) || isset($boardOptions['moderator_string']) || isset($boardOptions['moderator_groups']) || isset($boardOptions['moderator_group_string']))
 	{
 		// Reset current moderators for this board - if there are any!
 		$smcFunc['db_query']('', '
@@ -700,9 +724,10 @@ function modifyBoard($board_id, &$boardOptions)
 					SELECT id_member
 					FROM {db_prefix}members
 					WHERE member_name IN ({array_string:moderator_list}) OR real_name IN ({array_string:moderator_list})
-					LIMIT ' . count($moderators),
+					LIMIT {int:limit}',
 					array(
 						'moderator_list' => $moderators,
+						'limit' => count($moderators),
 					)
 				);
 				while ($row = $smcFunc['db_fetch_assoc']($request))
@@ -726,6 +751,75 @@ function modifyBoard($board_id, &$boardOptions)
 			);
 		}
 
+		// Reset current moderator groups for this board - if there are any!
+		$smcFunc['db_query']('', '
+			DELETE FROM {db_prefix}moderator_groups
+			WHERE id_board = {int:board_list}',
+			array(
+				'board_list' => $board_id,
+			)
+		);
+
+		// Validate and get the IDs of the new moderator groups.
+		if (isset($boardOptions['moderator_group_string']) && trim($boardOptions['moderator_group_string']) != '')
+		{
+			// Divvy out the group names, remove extra space.
+			$moderator_group_string = strtr($smcFunc['htmlspecialchars']($boardOptions['moderator_group_string'], ENT_QUOTES), array('&quot;' => '"'));
+			preg_match_all('~"([^"]+)"~', $moderator_group_string, $matches);
+			$moderator_groups = array_merge($matches[1], explode(',', preg_replace('~"[^"]+"~', '', $moderator_group_string)));
+			for ($k = 0, $n = count($moderator_groups); $k < $n; $k++)
+			{
+				$moderator_groups[$k] = trim($moderator_groups[$k]);
+
+				if (strlen($moderator_groups[$k]) == 0)
+					unset($moderator_groups[$k]);
+			}
+
+			/* 	Find all the id_group's for all the group names in the list
+				But skip any invalid ones (invisible/post groups/Administrator/Moderator) */
+			if (empty($boardOptions['moderator_groups']))
+				$boardOptions['moderator_groups'] = array();
+			if (!empty($moderator_groups))
+			{
+				$request = $smcFunc['db_query']('', '
+					SELECT id_group
+					FROM {db_prefix}membergroups
+					WHERE group_name IN ({array_string:moderator_group_list})
+						AND hidden = {int:visible}
+						AND min_posts = {int:negative_one}
+						AND id_group NOT IN ({array_int:invalid_groups})
+					LIMIT {int:limit}',
+					array(
+						'visible' => 0,
+						'negative_one' => -1,
+						'invalid_groups' => array(1, 3),
+						'moderator_group_list' => $moderator_groups,
+						'limit' => count($moderator_groups),
+					)
+				);
+				while ($row = $smcFunc['db_fetch_assoc']($request))
+				{
+					$boardOptions['moderator_groups'][] = $row['id_group'];
+				}
+				$smcFunc['db_free_result']($request);
+			}
+		}
+
+		// Add the moderator groups to the board.
+		if (!empty($boardOptions['moderator_groups']))
+		{
+			$inserts = array();
+			foreach ($boardOptions['moderator_groups'] as $moderator_group)
+				$inserts[] = array($board_id, $moderator_group);
+
+			$smcFunc['db_insert']('insert',
+				'{db_prefix}moderator_groups',
+				array('id_board' => 'int', 'id_group' => 'int'),
+				$inserts,
+				array('id_board', 'id_group')
+			);
+		}
+
 		// Note that caches can now be wrong!
 		updateSettings(array('settings_updated' => time()));
 	}
@@ -733,23 +827,50 @@ function modifyBoard($board_id, &$boardOptions)
 	if (isset($boardOptions['move_to']))
 		reorderBoards();
 
+	$parsed_boards_cat_id = isset($id_cat) ? $id_cat : $boardOptions['old_id_cat'];
+	$already_parsed_boards = getBoardsParsedDescription($parsed_boards_cat_id);
+
+	if (isset($boardOptions['board_description']))
+		$already_parsed_boards[$board_id] = parse_bbc(
+			$boardOptions['board_description'],
+			false,
+
+			'',
+			$context['description_allowed_tags']);
+
 	clean_cache('data');
+
+	cache_put_data('parsed_boards_descriptions_'. $parsed_boards_cat_id, $already_parsed_boards, 864000);
 
 	if (empty($boardOptions['dont_log']))
 		logAction('edit_board', array('board' => $board_id), 'admin');
 }
 
-// Create a new board and set its properties and position.
+/**
+ * Create a new board and set its properties and position.
+ * Allows (almost) the same options as the modifyBoard() function.
+ * With the option inherit_permissions set, the parent board permissions
+ * will be inherited.
+ *
+ * @param array $boardOptions An array of information for the new board
+ * @return int The ID of the new board
+ */
 function createBoard($boardOptions)
 {
-	global $boards, $modSettings, $smcFunc;
+	global $boards, $smcFunc, $txt;
 
 	// Trigger an error if one of the required values is not set.
 	if (!isset($boardOptions['board_name']) || trim($boardOptions['board_name']) == '' || !isset($boardOptions['move_to']) || !isset($boardOptions['target_category']))
-		trigger_error('createBoard(): One or more of the required options is not set', E_USER_ERROR);
+	{
+		loadLanguage('Errors');
+		trigger_error($txt['create_board_missing_options'], E_USER_ERROR);
+	}
 
 	if (in_array($boardOptions['move_to'], array('child', 'before', 'after')) && !isset($boardOptions['target_board']))
-		trigger_error('createBoard(): Target board is not set', E_USER_ERROR);
+	{
+		loadLanguage('Errors');
+		trigger_error($txt['move_board_no_target'], E_USER_ERROR);
+	}
 
 	// Set every optional value to its default value.
 	$boardOptions += array(
@@ -764,20 +885,25 @@ function createBoard($boardOptions)
 		'dont_log' => true,
 	);
 
-	// Insert a board, the settings are dealt with later.
-	$smcFunc['db_insert']('',
-		'{db_prefix}boards',
-		array(
-			'id_cat' => 'int', 'name' => 'string-255', 'description' => 'string', 'board_order' => 'int',
-			'member_groups' => 'string', 'redirect' => 'string',
-		),
-		array(
-			$boardOptions['target_category'], $boardOptions['board_name'] , '', 0,
-			'-1,0', '',
-		),
-		array('id_board')
+	$board_columns = array(
+		'id_cat' => 'int', 'name' => 'string-255', 'description' => 'string', 'board_order' => 'int',
+		'member_groups' => 'string', 'redirect' => 'string',
 	);
-	$board_id = $smcFunc['db_insert_id']('{db_prefix}boards', 'id_board');
+	$board_parameters = array(
+		$boardOptions['target_category'], $boardOptions['board_name'], '', 0,
+		'', '',
+	);
+
+	call_integration_hook('integrate_create_board', array(&$boardOptions, &$board_columns, &$board_parameters));
+
+	// Insert a board, the settings are dealt with later.
+	$board_id = $smcFunc['db_insert']('',
+		'{db_prefix}boards',
+		$board_columns,
+		$board_parameters,
+		array('id_board'),
+		1
+	);
 
 	if (empty($board_id))
 		return 0;
@@ -826,7 +952,18 @@ function createBoard($boardOptions)
 	return $board_id;
 }
 
-// Remove one or more boards.
+/**
+ * Remove one or more boards.
+ * Allows to move the children of the board before deleting it
+ * if moveChildrenTo is set to null, the child boards will be deleted.
+ * Deletes:
+ *   - all topics that are on the given boards;
+ *   - all information that's associated with the given boards;
+ * updates the statistics to reflect the new situation.
+ *
+ * @param array $boards_to_remove The boards to remove
+ * @param int $moveChildrenTo The ID of the board to move the child boards to (null to remove the child boards, 0 to make them a top-level board)
+ */
 function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 {
 	global $sourcedir, $boards, $smcFunc;
@@ -836,6 +973,8 @@ function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 		return;
 
 	getBoardTree();
+
+	call_integration_hook('integrate_delete_board', array($boards_to_remove, &$moveChildrenTo));
 
 	// If $moveChildrenTo is set to null, include the children in the removal.
 	if ($moveChildrenTo === null)
@@ -854,7 +993,7 @@ function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 	{
 		foreach ($boards_to_remove as $id_board)
 		{
-			// !!! Separate category?
+			// @todo Separate category?
 			if ($moveChildrenTo === 0)
 				fixChildren($id_board, 0, 0);
 			else
@@ -911,6 +1050,15 @@ function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 		)
 	);
 
+	// Delete this board's moderator groups.
+	$smcFunc['db_query']('', '
+		DELETE FROM {db_prefix}moderator_groups
+		WHERE id_board IN ({array_int:boards_to_remove})',
+		array(
+			'boards_to_remove' => $boards_to_remove,
+		)
+	);
+
 	// Delete any extra events in the calendar.
 	$smcFunc['db_query']('', '
 		DELETE FROM {db_prefix}calendar
@@ -938,6 +1086,15 @@ function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 		)
 	);
 
+	// Delete permissions
+	$smcFunc['db_query']('', '
+		DELETE FROM {db_prefix}board_permissions_view
+		WHERE id_board IN ({array_int:boards_to_remove})',
+		array(
+			'boards_to_remove' => $boards_to_remove,
+		)
+	);
+
 	// Latest message/topic might not be there anymore.
 	updateStats('message');
 	updateStats('topic');
@@ -958,7 +1115,10 @@ function deleteBoards($boards_to_remove, $moveChildrenTo = null)
 	reorderBoards();
 }
 
-// Put all boards in the right order.
+/**
+ * Put all boards in the right order and sorts the records of the boards table.
+ * Used by modifyBoard(), deleteBoards(), modifyCategory(), and deleteCategories() functions
+ */
 function reorderBoards()
 {
 	global $cat_tree, $boardList, $boards, $smcFunc;
@@ -982,17 +1142,18 @@ function reorderBoards()
 				);
 	}
 
-	// Sort the records of the boards table on the board_order value.
-	$smcFunc['db_query']('alter_table_boards', '
-		ALTER TABLE {db_prefix}boards
-		ORDER BY board_order',
-		array(
-			'db_error_skip' => true,
-		)
-	);
+	// Empty the board order cache
+	cache_put_data('board_order', null, -3600);
 }
 
-// Fixes the children of a board by setting their child_levels to new values.
+/**
+ * Fixes the children of a board by setting their child_levels to new values.
+ * Used when a board is deleted or moved, to affect its children.
+ *
+ * @param int $parent The ID of the parent board
+ * @param int $newLevel The new child level for each of the child boards
+ * @param int $newParent The ID of the new parent board
+ */
 function fixChildren($parent, $newLevel, $newParent)
 {
 	global $smcFunc;
@@ -1028,22 +1189,218 @@ function fixChildren($parent, $newLevel, $newParent)
 		fixChildren($child, $newLevel + 1, $child);
 }
 
-// Load a lot of useful information regarding the boards and categories.
+/**
+ * Tries to load up the entire board order and category very very quickly
+ * Returns an array with two elements, cats and boards
+ *
+ * @return array An array of categories and boards
+ */
+function getTreeOrder()
+{
+	global $smcFunc;
+
+	static $tree_order = array(
+		'cats' => array(),
+		'boards' => array(),
+	);
+
+	if (!empty($tree_order['boards']))
+		return $tree_order;
+
+	if (($cached = cache_get_data('board_order', 86400)) !== null)
+	{
+		$tree_order = $cached;
+		return $cached;
+	}
+
+	$request = $smcFunc['db_query']('', '
+		SELECT b.id_board, b.id_cat
+		FROM {db_prefix}categories AS c
+			JOIN {db_prefix}boards AS b ON (b.id_cat = c.id_cat)
+		ORDER BY c.cat_order, b.board_order'
+	);
+
+	foreach ($smcFunc['db_fetch_all']($request) as $row)
+	{
+		if (!in_array($row['id_cat'], $tree_order['cats']))
+			$tree_order['cats'][] = $row['id_cat'];
+		$tree_order['boards'][] = $row['id_board'];
+	}
+	$smcFunc['db_free_result']($request);
+
+	cache_put_data('board_order', $tree_order, 86400);
+
+	return $tree_order;
+}
+
+/**
+ * Takes a board array and sorts it
+ *
+ * @param array &$boards The boards
+ */
+function sortBoards(array &$boards)
+{
+	$tree = getTreeOrder();
+
+	$ordered = array();
+	foreach ($tree['boards'] as $board)
+		if (!empty($boards[$board]))
+		{
+			$ordered[$board] = $boards[$board];
+
+			if (is_array($ordered[$board]) && !empty($ordered[$board]['boards']))
+				sortBoards($ordered[$board]['boards']);
+
+			if (is_array($ordered[$board]) && !empty($ordered[$board]['children']))
+				sortBoards($ordered[$board]['children']);
+		}
+
+	$boards = $ordered;
+}
+
+/**
+ * Takes a category array and sorts it
+ *
+ * @param array &$categories The categories
+ */
+function sortCategories(array &$categories)
+{
+	$tree = getTreeOrder();
+
+	$ordered = array();
+	foreach ($tree['cats'] as $cat)
+		if (!empty($categories[$cat]))
+		{
+			$ordered[$cat] = $categories[$cat];
+			if (!empty($ordered[$cat]['boards']))
+				sortBoards($ordered[$cat]['boards']);
+		}
+
+	$categories = $ordered;
+}
+
+/**
+ * Returns the given board's moderators, with their names and links
+ *
+ * @param array $boards The boards to get moderators of
+ * @return array An array containing information about the moderators of each board
+ */
+function getBoardModerators(array $boards)
+{
+	global $smcFunc, $scripturl, $txt;
+
+	if (empty($boards))
+		return array();
+
+	$request = $smcFunc['db_query']('', '
+		SELECT mem.id_member, mem.real_name, mo.id_board
+		FROM {db_prefix}moderators AS mo
+			INNER JOIN {db_prefix}members AS mem ON (mem.id_member = mo.id_member)
+		WHERE mo.id_board IN ({array_int:boards})',
+		array(
+			'boards' => $boards,
+		)
+	);
+	$moderators = array();
+	while ($row = $smcFunc['db_fetch_assoc']($request))
+	{
+		if (empty($moderators[$row['id_board']]))
+			$moderators[$row['id_board']] = array();
+
+		$moderators[$row['id_board']][] = array(
+			'id' => $row['id_member'],
+			'name' => $row['real_name'],
+			'href' => $scripturl . '?action=profile;u=' . $row['id_member'],
+			'link' => '<a href="' . $scripturl . '?action=profile;u=' . $row['id_member'] . '" title="' . $txt['board_moderator'] . '">' . $row['real_name'] . '</a>',
+		);
+	}
+	$smcFunc['db_free_result']($request);
+
+	return $moderators;
+}
+
+/**
+ * Returns board's moderator groups with their names and link
+ *
+ * @param array $boards The boards to get moderator groups of
+ * @return array An array containing information about the groups assigned to moderate each board
+ */
+function getBoardModeratorGroups(array $boards)
+{
+	global $smcFunc, $scripturl, $txt;
+
+	if (empty($boards))
+		return array();
+
+	$request = $smcFunc['db_query']('', '
+		SELECT mg.id_group, mg.group_name, bg.id_board
+		FROM {db_prefix}moderator_groups AS bg
+			INNER JOIN {db_prefix}membergroups AS mg ON (mg.id_group = bg.id_group)
+		WHERE bg.id_board IN ({array_int:boards})',
+		array(
+			'boards' => $boards,
+		)
+	);
+	$groups = array();
+	while ($row = $smcFunc['db_fetch_assoc']($request))
+	{
+		if (empty($groups[$row['id_board']]))
+			$groups[$row['id_board']] = array();
+
+		$groups[$row['id_board']][] = array(
+			'id' => $row['id_group'],
+			'name' => $row['group_name'],
+			'href' => $scripturl . '?action=groups;sa=members;group=' . $row['id_group'],
+			'link' => '<a href="' . $scripturl . '?action=groups;sa=members;group=' . $row['id_group'] . '" title="' . $txt['board_moderator'] . '">' . $row['group_name'] . '</a>',
+		);
+	}
+
+	return $groups;
+}
+
+/**
+ * Load a lot of useful information regarding the boards and categories.
+ * The information retrieved is stored in globals:
+ *  $boards		properties of each board.
+ *  $boardList	a list of boards grouped by category ID.
+ *  $cat_tree	properties of each category.
+ */
 function getBoardTree()
 {
-	global $cat_tree, $boards, $boardList, $txt, $modSettings, $smcFunc;
+	global $cat_tree, $boards, $boardList, $smcFunc;
+
+	$boardColumns = array(
+		'COALESCE(b.id_board, 0) AS id_board', 'b.id_parent', 'b.name AS board_name',
+		'b.description', 'b.child_level', 'b.board_order', 'b.count_posts', 'b.member_groups',
+		'b.id_theme', 'b.override_theme', 'b.id_profile', 'b.redirect', 'b.num_posts',
+		'b.num_topics', 'b.deny_member_groups', 'c.id_cat', 'c.name AS cat_name',
+		'c.description AS cat_desc', 'c.cat_order', 'c.can_collapse',
+	);
+	$boardParameters = array();
+	$boardJoins = array();
+	$boardWhere = array();
+	$boardOrder = array('c.cat_order', 'b.child_level', 'b.board_order');
+
+	// Let mods add extra columns, parameters, etc., to the SELECT query
+	call_integration_hook('integrate_pre_boardtree', array(&$boardColumns, &$boardParameters, &$boardJoins, &$boardWhere, &$boardOrder));
+
+	$boardColumns = array_unique($boardColumns);
+	$boardParameters = array_unique($boardParameters);
+	$boardJoins = array_unique($boardJoins);
+	$boardWhere = array_unique($boardWhere);
+	$boardOrder = array_unique($boardOrder);
 
 	// Getting all the board and category information you'd ever wanted.
 	$request = $smcFunc['db_query']('', '
 		SELECT
-			IFNULL(b.id_board, 0) AS id_board, b.id_parent, b.name AS board_name, b.description, b.child_level,
-			b.board_order, b.count_posts, b.member_groups, b.id_theme, b.override_theme, b.id_profile, b.redirect,
-			b.num_posts, b.num_topics, c.id_cat, c.name AS cat_name, c.cat_order, c.can_collapse
+			' . implode(', ', $boardColumns) . '
 		FROM {db_prefix}categories AS c
-			LEFT JOIN {db_prefix}boards AS b ON (b.id_cat = c.id_cat)
-		ORDER BY c.cat_order, b.child_level, b.board_order',
-		array(
-		)
+			LEFT JOIN {db_prefix}boards AS b ON (b.id_cat = c.id_cat)' . implode('
+			', $boardJoins) . '
+		WHERE {query_see_board}' . (empty($boardWhere) ? '' : '
+			AND (' . implode(') AND (', $boardWhere) . ')') . '
+		ORDER BY ' . implode(', ', $boardOrder),
+		$boardParameters
 	);
 	$cat_tree = array();
 	$boards = array();
@@ -1056,6 +1413,7 @@ function getBoardTree()
 				'node' => array(
 					'id' => $row['id_cat'],
 					'name' => $row['cat_name'],
+					'description' => $row['cat_desc'],
 					'order' => $row['cat_order'],
 					'can_collapse' => $row['can_collapse']
 				),
@@ -1080,6 +1438,7 @@ function getBoardTree()
 				'order' => $row['board_order'],
 				'name' => $row['board_name'],
 				'member_groups' => explode(',', $row['member_groups']),
+				'deny_groups' => explode(',', $row['deny_member_groups']),
 				'description' => $row['description'],
 				'count_posts' => empty($row['count_posts']),
 				'posts' => $row['num_posts'],
@@ -1128,6 +1487,9 @@ function getBoardTree()
 				$boards[$row['id_board']]['tree'] = &$boards[$row['id_parent']]['tree']['children'][$row['id_board']];
 			}
 		}
+
+		// If mods want to do anything with this board before we move on, now's the time
+		call_integration_hook('integrate_boardtree_board', array($row));
 	}
 	$smcFunc['db_free_result']($request);
 
@@ -1140,7 +1502,13 @@ function getBoardTree()
 	}
 }
 
-// Recursively get a list of boards.
+/**
+ * Recursively get a list of boards.
+ * Used by getBoardTree
+ *
+ * @param array &$_boardList The board list
+ * @param array &$_tree The board tree
+ */
 function recursiveBoards(&$_boardList, &$_tree)
 {
 	if (empty($_tree['children']))
@@ -1153,7 +1521,13 @@ function recursiveBoards(&$_boardList, &$_tree)
 	}
 }
 
-// Returns whether the child board id is actually a child of the parent (recursive).
+/**
+ * Returns whether the child board id is actually a child of the parent (recursive).
+ *
+ * @param int $child The ID of the child board
+ * @param int $parent The ID of a parent board
+ * @return boolean Whether the specified child board is actually a child of the specified parent board.
+ */
 function isChildOf($child, $parent)
 {
 	global $boards;
@@ -1165,6 +1539,37 @@ function isChildOf($child, $parent)
 		return true;
 
 	return isChildOf($boards[$child]['parent'], $parent);
+}
+
+function setBoardParsedDescription($category_id = 0, $boards_info = array())
+{
+	global $context;
+
+	if (empty($category_id) || empty($boards_info))
+		return array();
+
+	// Get the data we already parsed
+	$already_parsed_boards = getBoardsParsedDescription($category_id);
+
+	foreach ($boards_info as $board_id => $board_description)
+		$already_parsed_boards[$board_id] = parse_bbc(
+			$board_description,
+			false,
+			'',
+			$context['description_allowed_tags']
+		);
+
+	cache_put_data('parsed_boards_descriptions_'. $category_id, $already_parsed_boards, 864000);
+
+	return $already_parsed_boards;
+}
+
+function getBoardsParsedDescription($category_id = 0)
+{
+	if (empty($category_id))
+		return array();
+
+	return (array) cache_get_data('parsed_boards_descriptions_' . $category_id, 864000);
 }
 
 ?>

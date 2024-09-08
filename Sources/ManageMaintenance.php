@@ -1,116 +1,28 @@
 <?php
 
 /**
+ * Forum maintenance. Important stuff.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2023 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.19
+ * @version 2.1.4
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/* /!!!
-
-	void ManageMaintenance()
-		// !!!
-
-	void MaintainDatabase()
-		// !!!
-
-	void MaintainMembers()
-		// !!!
-
-	void MaintainTopics()
-		// !!!
-
-	void MaintainCleanCache()
-		// !!!
-
-	void MaintainFindFixErrors()
-		// !!!
-
-	void MaintainEmptyUnimportantLogs()
-		// !!!
-
-	void ConvertUtf8()
-		- converts the data and database tables to UTF-8 character set.
-		- requires the admin_forum permission.
-		- uses the convert_utf8 sub template of the Admin template.
-		- only works if UTF-8 is not the global character set.
-		- supports all character sets used by SMF's language files.
-		- redirects to ?action=admin;area=maintain after finishing.
-		- is linked from the maintenance screen (if applicable).
-		- accessed by ?action=admin;area=maintain;sa=database;activity=convertutf8.
-
-	void ConvertEntities()
-		- converts HTML-entities to UTF-8 characters.
-		- requires the admin_forum permission.
-		- uses the convert_entities sub template of the Admin template.
-		- only works if UTF-8 has been set as database and global character set.
-		- is divided in steps of 10 seconds.
-		- is linked from the maintenance screen (if applicable).
-		- accessed by ?action=admin;area=maintain;sa=database;activity=convertentities.
-
-	void OptimizeTables()
-		- optimizes all tables in the database and lists how much was saved.
-		- requires the admin_forum permission.
-		- uses the rawdata sub template (built in.)
-		- shows as the maintain_forum admin area.
-		- updates the optimize scheduled task such that the tables are not
-		  automatically optimized again too soon.
-		- accessed from ?action=admin;area=maintain;sa=database;activity=optimize.
-
-	void AdminBoardRecount()
-		- recounts many forum totals that can be recounted automatically
-		  without harm.
-		- requires the admin_forum permission.
-		- shows the maintain_forum admin area.
-		- fixes topics with wrong num_replies.
-		- updates the num_posts and num_topics of all boards.
-		- recounts instant_messages but not unread_messages.
-		- repairs messages pointing to boards with topics pointing to
-		  other boards.
-		- updates the last message posted in boards and children.
-		- updates member count, latest member, topic count, and message count.
-		- redirects back to ?action=admin;area=maintain when complete.
-		- accessed via ?action=admin;area=maintain;sa=database;activity=recount.
-
-	void VersionDetail()
-		- parses the comment headers in all files for their version information
-		  and outputs that for some javascript to check with simplemacines.org.
-		- does not connect directly with simplemachines.org, but rather
-		  expects the client to.
-		- requires the admin_forum permission.
-		- uses the view_versions admin area.
-		- loads the view_versions sub template (in the Admin template.)
-		- accessed through ?action=admin;area=maintain;sa=routine;activity=version.
-
-	void MaintainReattributePosts()
-		// !!!
-
-	void MaintainDownloadBackup()
-		// !!!
-
-	void MaintainPurgeInactiveMembers()
-		// !!!
-
-	void MaintainRemoveOldPosts(bool do_action = true)
-		// !!!
-
-	mixed MaintainMassMoveTopics()
-		- Moves topics from one board to another.
-		- User the not_done template to pause the process.
-*/
-
-// The maintenance access point.
+/**
+ * Main dispatcher, the maintenance access point.
+ * This, as usual, checks permissions, loads language files, and forwards to the actual workers.
+ */
 function ManageMaintenance()
 {
-	global $txt, $modSettings, $scripturl, $context, $options;
+	global $txt, $context;
 
 	// You absolutely must be an admin by here!
 	isAllowedTo('admin_forum');
@@ -140,6 +52,7 @@ function ManageMaintenance()
 				'version' => 'VersionDetail',
 				'repair' => 'MaintainFindFixErrors',
 				'recount' => 'AdminBoardRecount',
+				'rebuild_settings' => 'RebuildSettingsFile',
 				'logs' => 'MaintainEmptyUnimportantLogs',
 				'cleancache' => 'MaintainCleanCache',
 			),
@@ -149,9 +62,8 @@ function ManageMaintenance()
 			'template' => 'maintain_database',
 			'activities' => array(
 				'optimize' => 'OptimizeTables',
-				'backup' => 'MaintainDownloadBackup',
 				'convertentities' => 'ConvertEntities',
-				'convertutf8' => 'ConvertUtf8',
+				'convertmsgbody' => 'ConvertMsgBody',
 			),
 		),
 		'members' => array(
@@ -160,6 +72,7 @@ function ManageMaintenance()
 			'activities' => array(
 				'reattribute' => 'MaintainReattributePosts',
 				'purgeinactive' => 'MaintainPurgeInactiveMembers',
+				'recountposts' => 'MaintainRecountPosts',
 			),
 		),
 		'topics' => array(
@@ -168,13 +81,19 @@ function ManageMaintenance()
 			'activities' => array(
 				'massmove' => 'MaintainMassMoveTopics',
 				'pruneold' => 'MaintainRemoveOldPosts',
+				'olddrafts' => 'MaintainRemoveOldDrafts',
 			),
+		),
+		'hooks' => array(
+			'function' => 'list_integration_hooks',
 		),
 		'destroy' => array(
 			'function' => 'Destroy',
 			'activities' => array(),
 		),
 	);
+
+	call_integration_hook('integrate_manage_maintenance', array(&$subActions));
 
 	// Yep, sub-action time!
 	if (isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]))
@@ -192,42 +111,57 @@ function ManageMaintenance()
 	$context['sub_template'] = !empty($subActions[$subAction]['template']) ? $subActions[$subAction]['template'] : '';
 
 	// Finally fall through to what we are doing.
-	$subActions[$subAction]['function']();
+	call_helper($subActions[$subAction]['function']);
 
 	// Any special activity?
 	if (isset($activity))
-		$subActions[$subAction]['activities'][$activity]();
+		call_helper($subActions[$subAction]['activities'][$activity]);
 
-	//converted to UTF-8? show a small maintenance info
-	if (isset($_GET['done']) && $_GET['done'] == 'convertutf8')
-		$context['maintenance_finished'] = $txt['utf8_title'];
+	// Create a maintenance token.  Kinda hard to do it any other way.
+	createToken('admin-maint');
 }
 
-// Supporting function for the database maintenance area.
+/**
+ * Supporting function for the database maintenance area.
+ */
 function MaintainDatabase()
 {
 	global $context, $db_type, $db_character_set, $modSettings, $smcFunc, $txt;
 
 	// Show some conversion options?
-	$context['convert_utf8'] = $db_type == 'mysql' && (!isset($db_character_set) || $db_character_set !== 'utf8' || empty($modSettings['global_character_set']) || $modSettings['global_character_set'] !== 'UTF-8') && version_compare('4.1.2', preg_replace('~\-.+?$~', '', $smcFunc['db_server_info']())) <= 0;
-	$context['convert_entities'] = $db_type == 'mysql' && isset($db_character_set, $modSettings['global_character_set']) && $db_character_set === 'utf8' && $modSettings['global_character_set'] === 'UTF-8';
+	$context['convert_entities'] = isset($modSettings['global_character_set']) && $modSettings['global_character_set'] === 'UTF-8';
 
-	if (isset($_GET['done']) && $_GET['done'] == 'convertutf8')
-		$context['maintenance_finished'] = $txt['utf8_title'];
+	if ($db_type == 'mysql')
+	{
+		db_extend('packages');
+
+		$colData = $smcFunc['db_list_columns']('{db_prefix}messages', true);
+		foreach ($colData as $column)
+			if ($column['name'] == 'body')
+				$body_type = $column['type'];
+
+		$context['convert_to'] = $body_type == 'text' ? 'mediumtext' : 'text';
+		$context['convert_to_suggest'] = ($body_type != 'text' && !empty($modSettings['max_messageLength']) && $modSettings['max_messageLength'] < 65536);
+	}
+
 	if (isset($_GET['done']) && $_GET['done'] == 'convertentities')
 		$context['maintenance_finished'] = $txt['entity_convert_title'];
 }
 
-// Supporting function for the routine maintenance area.
+/**
+ * Supporting function for the routine maintenance area.
+ */
 function MaintainRoutine()
 {
 	global $context, $txt;
 
-	if (isset($_GET['done']) && $_GET['done'] == 'recount')
-		$context['maintenance_finished'] = $txt['maintain_recount'];
+	if (isset($_GET['done']) && in_array($_GET['done'], array('recount', 'rebuild_settings')))
+		$context['maintenance_finished'] = $txt['maintain_' . $_GET['done']];
 }
 
-// Supporting function for the members maintenance area.
+/**
+ * Supporting function for the members maintenance area.
+ */
 function MaintainMembers()
 {
 	global $context, $smcFunc, $txt;
@@ -253,12 +187,19 @@ function MaintainMembers()
 		);
 	}
 	$smcFunc['db_free_result']($result);
+
+	if (isset($_GET['done']) && $_GET['done'] == 'recountposts')
+		$context['maintenance_finished'] = $txt['maintain_recountposts'];
+
+	loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
 }
 
-// Supporting function for the topics maintenance area.
+/**
+ * Supporting function for the topics maintenance area.
+ */
 function MaintainTopics()
 {
-	global $context, $smcFunc, $txt;
+	global $context, $smcFunc, $txt, $sourcedir;
 
 	// Let's load up the boards in case they are useful.
 	$result = $smcFunc['db_query']('order_by_board_order', '
@@ -280,7 +221,7 @@ function MaintainTopics()
 				'boards' => array()
 			);
 
-		$context['categories'][$row['id_cat']]['boards'][] = array(
+		$context['categories'][$row['id_cat']]['boards'][$row['id_board']] = array(
 			'id' => $row['id_board'],
 			'name' => $row['name'],
 			'child_level' => $row['child_level']
@@ -288,25 +229,38 @@ function MaintainTopics()
 	}
 	$smcFunc['db_free_result']($result);
 
+	require_once($sourcedir . '/Subs-Boards.php');
+	sortCategories($context['categories']);
+
 	if (isset($_GET['done']) && $_GET['done'] == 'purgeold')
 		$context['maintenance_finished'] = $txt['maintain_old'];
 	elseif (isset($_GET['done']) && $_GET['done'] == 'massmove')
 		$context['maintenance_finished'] = $txt['move_topics_maintenance'];
 }
 
-// Find and fix all errors.
+/**
+ * Find and fix all errors on the forum.
+ */
 function MaintainFindFixErrors()
 {
 	global $sourcedir;
+
+	// Honestly, this should be done in the sub function.
+	validateToken('admin-maint');
 
 	require_once($sourcedir . '/RepairBoards.php');
 	RepairBoards();
 }
 
-// Wipes the whole cache directory.
+/**
+ * Wipes the whole cache.
+ */
 function MaintainCleanCache()
 {
 	global $context, $txt;
+
+	checkSession();
+	validateToken('admin-maint');
 
 	// Just wipe the whole cache directory!
 	clean_cache();
@@ -314,12 +268,15 @@ function MaintainCleanCache()
 	$context['maintenance_finished'] = $txt['maintain_cache'];
 }
 
-// Empties all uninmportant logs
+/**
+ * Empties all uninmportant logs
+ */
 function MaintainEmptyUnimportantLogs()
 {
 	global $context, $smcFunc, $txt;
 
 	checkSession();
+	validateToken('admin-maint');
 
 	// No one's online now.... MUHAHAHAHA :P.
 	$smcFunc['db_query']('', '
@@ -337,10 +294,6 @@ function MaintainEmptyUnimportantLogs()
 	$smcFunc['db_query']('', '
 		DELETE FROM {db_prefix}log_floodcontrol');
 
-	// Clear out the karma actions.
-	$smcFunc['db_query']('', '
-		DELETE FROM {db_prefix}log_karma');
-
 	// Last but not least, the search logs!
 	$smcFunc['db_query']('truncate_table', '
 		TRUNCATE {db_prefix}log_search_topics');
@@ -356,13 +309,15 @@ function MaintainEmptyUnimportantLogs()
 	$context['maintenance_finished'] = $txt['maintain_logs'];
 }
 
-// Oh noes!
+/**
+ * Oh noes! I'd document this but that would give it away
+ */
 function Destroy()
 {
 	global $context;
 
-	echo '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-		<html xmlns="http://www.w3.org/1999/xhtml"', $context['right_to_left'] ? ' dir="rtl"' : '', '><head><title>', $context['forum_name_html_safe'], ' deleted!</title></head>
+	echo '<!DOCTYPE html>
+		<html', $context['right_to_left'] ? ' dir="rtl"' : '', '><head><title>', $context['forum_name_html_safe'], ' deleted!</title></head>
 		<body style="background-color: orange; font-family: arial, sans-serif; text-align: center;">
 		<div style="margin-top: 8%; font-size: 400%; color: black;">Oh my, you killed ', $context['forum_name_html_safe'], '!</div>
 		<div style="margin-top: 7%; font-size: 500%; color: red;"><strong>You lazy bum!</strong></div>
@@ -370,365 +325,169 @@ function Destroy()
 	obExit(false);
 }
 
-// Convert both data and database tables to UTF-8 character set.
-function ConvertUtf8()
+/**
+ * Convert the column "body" of the table {db_prefix}messages from TEXT to MEDIUMTEXT and vice versa.
+ * It requires the admin_forum permission.
+ * This is needed only for MySQL.
+ * During the conversion from MEDIUMTEXT to TEXT it check if any of the posts exceed the TEXT length and if so it aborts.
+ * This action is linked from the maintenance screen (if it's applicable).
+ * Accessed by ?action=admin;area=maintain;sa=database;activity=convertmsgbody.
+ *
+ * @uses template_convert_msgbody()
+ */
+function ConvertMsgBody()
 {
-	global $scripturl, $context, $txt, $language, $db_character_set;
-	global $modSettings, $user_info, $sourcedir, $smcFunc, $db_prefix;
+	global $scripturl, $context, $txt, $db_type;
+	global $modSettings, $smcFunc;
 
 	// Show me your badge!
 	isAllowedTo('admin_forum');
 
-	// The character sets used in SMF's language files with their db equivalent.
-	$charsets = array(
-		// Chinese-traditional.
-		'big5' => 'big5',
-		// Chinese-simplified.
-		'gbk' => 'gbk',
-		// West European.
-		'ISO-8859-1' => 'latin1',
-		// Romanian.
-		'ISO-8859-2' => 'latin2',
-		// Turkish.
-		'ISO-8859-9' => 'latin5',
-		// West European with Euro sign.
-		'ISO-8859-15' => 'latin9',
-		// Thai.
-		'tis-620' => 'tis620',
-		// Persian, Chinese, etc.
-		'UTF-8' => 'utf8',
-		// Russian.
-		'windows-1251' => 'cp1251',
-		// Greek.
-		'windows-1253' => 'utf8',
-		// Hebrew.
-		'windows-1255' => 'utf8',
-		// Arabic.
-		'windows-1256' => 'cp1256',
-	);
+	if ($db_type != 'mysql')
+		return;
 
-	// Get a list of character sets supported by your MySQL server.
-	$request = $smcFunc['db_query']('', '
-		SHOW CHARACTER SET',
-		array(
-		)
-	);
-	$db_charsets = array();
-	while ($row = $smcFunc['db_fetch_assoc']($request))
-		$db_charsets[] = $row['Charset'];
+	db_extend('packages');
 
-	$smcFunc['db_free_result']($request);
+	$colData = $smcFunc['db_list_columns']('{db_prefix}messages', true);
+	foreach ($colData as $column)
+		if ($column['name'] == 'body')
+			$body_type = $column['type'];
 
-	// Character sets supported by both MySQL and SMF's language files.
-	$charsets = array_intersect($charsets, $db_charsets);
+	$context['convert_to'] = $body_type == 'text' ? 'mediumtext' : 'text';
 
-	// This is for the first screen telling backups is good.
-	if (!isset($_POST['proceed']))
+	if ($body_type == 'text' || ($body_type != 'text' && isset($_POST['do_conversion'])))
 	{
-		// Character set conversions are only supported as of MySQL 4.1.2.
-		if (version_compare('4.1.2', preg_replace('~\-.+?$~', '', $smcFunc['db_server_info']())) > 0)
-			fatal_lang_error('utf8_db_version_too_low');
+		checkSession();
+		validateToken('admin-maint');
 
-		// Use the messages.body column as indicator for the database charset.
-		$request = $smcFunc['db_query']('', '
-			SHOW FULL COLUMNS
-			FROM {db_prefix}messages
-			LIKE {string:body_like}',
-			array(
-				'body_like' => 'body',
-			)
-		);
-		$column_info = $smcFunc['db_fetch_assoc']($request);
-		$smcFunc['db_free_result']($request);
+		// Make it longer so we can do their limit.
+		if ($body_type == 'text')
+			$smcFunc['db_change_column']('{db_prefix}messages', 'body', array('type' => 'mediumtext'));
+		// Shorten the column so we can have a bit (literally per record) less space occupied
+		else
+			$smcFunc['db_change_column']('{db_prefix}messages', 'body', array('type' => 'text'));
 
-		// A collation looks like latin1_swedish. We only need the character set.
-		list($context['database_charset']) = explode('_', $column_info['Collation']);
-		$context['database_charset'] = in_array($context['database_charset'], $charsets) ? array_search($context['database_charset'], $charsets) : $context['database_charset'];
+		// 3rd party integrations may be interested in knowning about this.
+		call_integration_hook('integrate_convert_msgbody', array($body_type));
 
-		// No need to convert to UTF-8 if it already is.
-		if ($db_character_set === 'utf8' && !empty($modSettings['global_character_set']) && $modSettings['global_character_set'] === 'UTF-8')
-			fatal_lang_error('utf8_already_utf8');
+		$colData = $smcFunc['db_list_columns']('{db_prefix}messages', true);
+		foreach ($colData as $column)
+			if ($column['name'] == 'body')
+				$body_type = $column['type'];
 
-		// Cannot do conversion if using a fulltext index
-		if (!empty($modSettings['search_index']) && $modSettings['search_index'] == 'fulltext')
-			fatal_lang_error('utf8_cannot_convert_fulltext');
+		$context['maintenance_finished'] = $txt[$context['convert_to'] . '_title'];
+		$context['convert_to'] = $body_type == 'text' ? 'mediumtext' : 'text';
+		$context['convert_to_suggest'] = ($body_type != 'text' && !empty($modSettings['max_messageLength']) && $modSettings['max_messageLength'] < 65536);
 
-		// Grab the character set from the default language file.
-		loadLanguage('index', $language, true);
-		$context['charset_detected'] = $txt['lang_character_set'];
-		$context['charset_about_detected'] = sprintf($txt['utf8_detected_charset'], $language, $context['charset_detected']);
-
-		// Go back to your own language.
-		loadLanguage('index', $user_info['language'], true);
-
-		// Show a warning if the character set seems not to be supported.
-		if (!isset($charsets[strtr(strtolower($context['charset_detected']), array('utf' => 'UTF', 'iso' => 'ISO'))]))
-		{
-			$context['charset_warning'] = sprintf($txt['utf8_charset_not_supported'], $txt['lang_character_set']);
-
-			// Default to ISO-8859-1.
-			$context['charset_detected'] = 'ISO-8859-1';
-		}
-
-		$context['charset_list'] = array_keys($charsets);
-
-		$context['page_title'] = $txt['utf8_title'];
-		$context['sub_template'] = 'convert_utf8';
 		return;
 	}
-
-	// After this point we're starting the conversion. But first: session check.
-	checkSession();
-
-	// Translation table for the character sets not native for MySQL.
-	$translation_tables = array(
-		'windows-1255' => array(
-			'0x81' => '\'\'',		'0x8A' => '\'\'',		'0x8C' => '\'\'',
-			'0x8D' => '\'\'',		'0x8E' => '\'\'',		'0x8F' => '\'\'',
-			'0x90' => '\'\'',		'0x9A' => '\'\'',		'0x9C' => '\'\'',
-			'0x9D' => '\'\'',		'0x9E' => '\'\'',		'0x9F' => '\'\'',
-			'0xCA' => '\'\'',		'0xD9' => '\'\'',		'0xDA' => '\'\'',
-			'0xDB' => '\'\'',		'0xDC' => '\'\'',		'0xDD' => '\'\'',
-			'0xDE' => '\'\'',		'0xDF' => '\'\'',		'0xFB' => '\'\'',
-			'0xFC' => '\'\'',		'0xFF' => '\'\'',		'0xC2' => '0xFF',
-			'0x80' => '0xFC',		'0xE2' => '0xFB',		'0xA0' => '0xC2A0',
-			'0xA1' => '0xC2A1',		'0xA2' => '0xC2A2',		'0xA3' => '0xC2A3',
-			'0xA5' => '0xC2A5',		'0xA6' => '0xC2A6',		'0xA7' => '0xC2A7',
-			'0xA8' => '0xC2A8',		'0xA9' => '0xC2A9',		'0xAB' => '0xC2AB',
-			'0xAC' => '0xC2AC',		'0xAD' => '0xC2AD',		'0xAE' => '0xC2AE',
-			'0xAF' => '0xC2AF',		'0xB0' => '0xC2B0',		'0xB1' => '0xC2B1',
-			'0xB2' => '0xC2B2',		'0xB3' => '0xC2B3',		'0xB4' => '0xC2B4',
-			'0xB5' => '0xC2B5',		'0xB6' => '0xC2B6',		'0xB7' => '0xC2B7',
-			'0xB8' => '0xC2B8',		'0xB9' => '0xC2B9',		'0xBB' => '0xC2BB',
-			'0xBC' => '0xC2BC',		'0xBD' => '0xC2BD',		'0xBE' => '0xC2BE',
-			'0xBF' => '0xC2BF',		'0xD7' => '0xD7B3',		'0xD1' => '0xD781',
-			'0xD4' => '0xD7B0',		'0xD5' => '0xD7B1',		'0xD6' => '0xD7B2',
-			'0xE0' => '0xD790',		'0xEA' => '0xD79A',		'0xEC' => '0xD79C',
-			'0xED' => '0xD79D',		'0xEE' => '0xD79E',		'0xEF' => '0xD79F',
-			'0xF0' => '0xD7A0',		'0xF1' => '0xD7A1',		'0xF2' => '0xD7A2',
-			'0xF3' => '0xD7A3',		'0xF5' => '0xD7A5',		'0xF6' => '0xD7A6',
-			'0xF7' => '0xD7A7',		'0xF8' => '0xD7A8',		'0xF9' => '0xD7A9',
-			'0x82' => '0xE2809A',	'0x84' => '0xE2809E',	'0x85' => '0xE280A6',
-			'0x86' => '0xE280A0',	'0x87' => '0xE280A1',	'0x89' => '0xE280B0',
-			'0x8B' => '0xE280B9',	'0x93' => '0xE2809C',	'0x94' => '0xE2809D',
-			'0x95' => '0xE280A2',	'0x97' => '0xE28094',	'0x99' => '0xE284A2',
-			'0xC0' => '0xD6B0',		'0xC1' => '0xD6B1',		'0xC3' => '0xD6B3',
-			'0xC4' => '0xD6B4',		'0xC5' => '0xD6B5',		'0xC6' => '0xD6B6',
-			'0xC7' => '0xD6B7',		'0xC8' => '0xD6B8',		'0xC9' => '0xD6B9',
-			'0xCB' => '0xD6BB',		'0xCC' => '0xD6BC',		'0xCD' => '0xD6BD',
-			'0xCE' => '0xD6BE',		'0xCF' => '0xD6BF',		'0xD0' => '0xD780',
-			'0xD2' => '0xD782',		'0xE3' => '0xD793',		'0xE4' => '0xD794',
-			'0xE5' => '0xD795',		'0xE7' => '0xD797',		'0xE9' => '0xD799',
-			'0xFD' => '0xE2808E',	'0xFE' => '0xE2808F',	'0x92' => '0xE28099',
-			'0x83' => '0xC692',		'0xD3' => '0xD783',		'0x88' => '0xCB86',
-			'0x98' => '0xCB9C',		'0x91' => '0xE28098',	'0x96' => '0xE28093',
-			'0xBA' => '0xC3B7',		'0x9B' => '0xE280BA',	'0xAA' => '0xC397',
-			'0xA4' => '0xE282AA',	'0xE1' => '0xD791',		'0xE6' => '0xD796',
-			'0xE8' => '0xD798',		'0xEB' => '0xD79B',		'0xF4' => '0xD7A4',
-			'0xFA' => '0xD7AA',		'0xFF' => '0xD6B2',		'0xFC' => '0xE282AC',
-			'0xFB' => '0xD792',
-		),
-		'windows-1253' => array(
-			'0x81' => '\'\'',			'0x88' => '\'\'',			'0x8A' => '\'\'',
-			'0x8C' => '\'\'',			'0x8D' => '\'\'',			'0x8E' => '\'\'',
-			'0x8F' => '\'\'',			'0x90' => '\'\'',			'0x98' => '\'\'',
-			'0x9A' => '\'\'',			'0x9C' => '\'\'',			'0x9D' => '\'\'',
-			'0x9E' => '\'\'',			'0x9F' => '\'\'',			'0xAA' => '\'\'',
-			'0xD2' => '\'\'',			'0xFF' => '\'\'',			'0xCE' => '0xCE9E',
-			'0xB8' => '0xCE88',		'0xBA' => '0xCE8A',		'0xBC' => '0xCE8C',
-			'0xBE' => '0xCE8E',		'0xBF' => '0xCE8F',		'0xC0' => '0xCE90',
-			'0xC8' => '0xCE98',		'0xCA' => '0xCE9A',		'0xCC' => '0xCE9C',
-			'0xCD' => '0xCE9D',		'0xCF' => '0xCE9F',		'0xDA' => '0xCEAA',
-			'0xE8' => '0xCEB8',		'0xEA' => '0xCEBA',		'0xEC' => '0xCEBC',
-			'0xEE' => '0xCEBE',		'0xEF' => '0xCEBF',		'0xC2' => '0xFF',
-			'0xBD' => '0xC2BD',		'0xED' => '0xCEBD',		'0xB2' => '0xC2B2',
-			'0xA0' => '0xC2A0',		'0xA3' => '0xC2A3',		'0xA4' => '0xC2A4',
-			'0xA5' => '0xC2A5',		'0xA6' => '0xC2A6',		'0xA7' => '0xC2A7',
-			'0xA8' => '0xC2A8',		'0xA9' => '0xC2A9',		'0xAB' => '0xC2AB',
-			'0xAC' => '0xC2AC',		'0xAD' => '0xC2AD',		'0xAE' => '0xC2AE',
-			'0xB0' => '0xC2B0',		'0xB1' => '0xC2B1',		'0xB3' => '0xC2B3',
-			'0xB5' => '0xC2B5',		'0xB6' => '0xC2B6',		'0xB7' => '0xC2B7',
-			'0xBB' => '0xC2BB',		'0xE2' => '0xCEB2',		'0x80' => '0xD2',
-			'0x82' => '0xE2809A',	'0x84' => '0xE2809E',	'0x85' => '0xE280A6',
-			'0x86' => '0xE280A0',	'0xA1' => '0xCE85',		'0xA2' => '0xCE86',
-			'0x87' => '0xE280A1',	'0x89' => '0xE280B0',	'0xB9' => '0xCE89',
-			'0x8B' => '0xE280B9',	'0x91' => '0xE28098',	'0x99' => '0xE284A2',
-			'0x92' => '0xE28099',	'0x93' => '0xE2809C',	'0x94' => '0xE2809D',
-			'0x95' => '0xE280A2',	'0x96' => '0xE28093',	'0x97' => '0xE28094',
-			'0x9B' => '0xE280BA',	'0xAF' => '0xE28095',	'0xB4' => '0xCE84',
-			'0xC1' => '0xCE91',		'0xC3' => '0xCE93',		'0xC4' => '0xCE94',
-			'0xC5' => '0xCE95',		'0xC6' => '0xCE96',		'0x83' => '0xC692',
-			'0xC7' => '0xCE97',		'0xC9' => '0xCE99',		'0xCB' => '0xCE9B',
-			'0xD0' => '0xCEA0',		'0xD1' => '0xCEA1',		'0xD3' => '0xCEA3',
-			'0xD4' => '0xCEA4',		'0xD5' => '0xCEA5',		'0xD6' => '0xCEA6',
-			'0xD7' => '0xCEA7',		'0xD8' => '0xCEA8',		'0xD9' => '0xCEA9',
-			'0xDB' => '0xCEAB',		'0xDC' => '0xCEAC',		'0xDD' => '0xCEAD',
-			'0xDE' => '0xCEAE',		'0xDF' => '0xCEAF',		'0xE0' => '0xCEB0',
-			'0xE1' => '0xCEB1',		'0xE3' => '0xCEB3',		'0xE4' => '0xCEB4',
-			'0xE5' => '0xCEB5',		'0xE6' => '0xCEB6',		'0xE7' => '0xCEB7',
-			'0xE9' => '0xCEB9',		'0xEB' => '0xCEBB',		'0xF0' => '0xCF80',
-			'0xF1' => '0xCF81',		'0xF2' => '0xCF82',		'0xF3' => '0xCF83',
-			'0xF4' => '0xCF84',		'0xF5' => '0xCF85',		'0xF6' => '0xCF86',
-			'0xF7' => '0xCF87',		'0xF8' => '0xCF88',		'0xF9' => '0xCF89',
-			'0xFA' => '0xCF8A',		'0xFB' => '0xCF8B',		'0xFC' => '0xCF8C',
-			'0xFD' => '0xCF8D',		'0xFE' => '0xCF8E',		'0xFF' => '0xCE92',
-			'0xD2' => '0xE282AC',
-		),
-	);
-
-	// Make some preparations.
-	if (isset($translation_tables[$_POST['src_charset']]))
+	elseif ($body_type != 'text' && (!isset($_POST['do_conversion']) || isset($_POST['cont'])))
 	{
-		$replace = '%field%';
-		foreach ($translation_tables[$_POST['src_charset']] as $from => $to)
-			$replace = 'REPLACE(' . $replace . ', ' . $from . ', ' . $to . ')';
-	}
+		checkSession();
+		if (empty($_REQUEST['start']))
+			validateToken('admin-maint');
+		else
+			validateToken('admin-convertMsg');
 
-	// Grab a list of tables.
-	if (preg_match('~^`(.+?)`\.(.+?)$~', $db_prefix, $match) === 1)
-		$queryTables = $smcFunc['db_query']('', '
-			SHOW TABLE STATUS
-			FROM `' . strtr($match[1], array('`' => '')) . '`
-			LIKE {string:table_name}',
-			array(
-				'table_name' => str_replace('_', '\_', $match[2]) . '%',
-			)
+		$context['page_title'] = $txt['not_done_title'];
+		$context['continue_post_data'] = '';
+		$context['continue_countdown'] = 3;
+		$context['sub_template'] = 'not_done';
+		$increment = 500;
+		$id_msg_exceeding = isset($_POST['id_msg_exceeding']) ? explode(',', $_POST['id_msg_exceeding']) : array();
+
+		$request = $smcFunc['db_query']('', '
+			SELECT COUNT(*) as count
+			FROM {db_prefix}messages',
+			array()
 		);
-	else
-		$queryTables = $smcFunc['db_query']('', '
-			SHOW TABLE STATUS
-			LIKE {string:table_name}',
-			array(
-				'table_name' => str_replace('_', '\_', $db_prefix) . '%',
-			)
-		);
+		list($max_msgs) = $smcFunc['db_fetch_row']($request);
+		$smcFunc['db_free_result']($request);
 
-	while ($table_info = $smcFunc['db_fetch_assoc']($queryTables))
-	{
-		// Just to make sure it doesn't time out.
-		if (function_exists('apache_reset_timeout'))
-			@apache_reset_timeout();
+		// Try for as much time as possible.
+		@set_time_limit(600);
 
-		$table_charsets = array();
-
-		// Loop through each column.
-		$queryColumns = $smcFunc['db_query']('', '
-			SHOW FULL COLUMNS
-			FROM ' . $table_info['Name'],
-			array(
-			)
-		);
-		while ($column_info = $smcFunc['db_fetch_assoc']($queryColumns))
+		while ($_REQUEST['start'] < $max_msgs)
 		{
-			// Only text'ish columns have a character set and need converting.
-			if (strpos($column_info['Type'], 'text') !== false || strpos($column_info['Type'], 'char') !== false)
+			$request = $smcFunc['db_query']('', '
+				SELECT id_msg
+				FROM {db_prefix}messages
+				WHERE id_msg BETWEEN {int:start} AND {int:start} + {int:increment}
+					AND LENGTH(body) > 65535',
+				array(
+					'start' => $_REQUEST['start'],
+					'increment' => $increment - 1,
+				)
+			);
+			while ($row = $smcFunc['db_fetch_assoc']($request))
+				$id_msg_exceeding[] = $row['id_msg'];
+			$smcFunc['db_free_result']($request);
+
+			$_REQUEST['start'] += $increment;
+
+			if (microtime(true) - TIME_START > 3)
 			{
-				$collation = empty($column_info['Collation']) || $column_info['Collation'] === 'NULL' ? $table_info['Collation'] : $column_info['Collation'];
-				if (!empty($collation) && $collation !== 'NULL')
-				{
-					list($charset) = explode('_', $collation);
+				createToken('admin-convertMsg');
+				$context['continue_post_data'] = '
+					<input type="hidden" name="' . $context['admin-convertMsg_token_var'] . '" value="' . $context['admin-convertMsg_token'] . '">
+					<input type="hidden" name="' . $context['session_var'] . '" value="' . $context['session_id'] . '">
+					<input type="hidden" name="id_msg_exceeding" value="' . implode(',', $id_msg_exceeding) . '">';
 
-					if (!isset($table_charsets[$charset]))
-						$table_charsets[$charset] = array();
+				$context['continue_get_data'] = '?action=admin;area=maintain;sa=database;activity=convertmsgbody;start=' . $_REQUEST['start'];
+				$context['continue_percent'] = round(100 * $_REQUEST['start'] / $max_msgs);
 
-					$table_charsets[$charset][] = $column_info;
-				}
+				return;
 			}
 		}
-		$smcFunc['db_free_result']($queryColumns);
+		createToken('admin-maint');
+		$context['page_title'] = $txt[$context['convert_to'] . '_title'];
+		$context['sub_template'] = 'convert_msgbody';
 
-		// Only change the column if the data doesn't match the current charset.
-		if ((count($table_charsets) === 1 && key($table_charsets) !== $charsets[$_POST['src_charset']]) || count($table_charsets) > 1)
+		if (!empty($id_msg_exceeding))
 		{
-			$updates_blob = '';
-			$updates_text = '';
-			foreach ($table_charsets as $charset => $columns)
+			if (count($id_msg_exceeding) > 100)
 			{
-				if ($charset !== $charsets[$_POST['src_charset']])
-				{
-					foreach ($columns as $column)
-					{
-						$updates_blob .= '
-							CHANGE COLUMN ' . $column['Field'] . ' ' . $column['Field'] . ' ' . strtr($column['Type'], array('text' => 'blob', 'char' => 'binary')) . ($column['Null'] === 'YES' ? ' NULL' : ' NOT NULL') . (strpos($column['Type'], 'char') === false ? '' : ' default \'' . $column['Default'] . '\'') . ',';
-						$updates_text .= '
-							CHANGE COLUMN ' . $column['Field'] . ' ' . $column['Field'] . ' ' . $column['Type'] . ' CHARACTER SET ' . $charsets[$_POST['src_charset']] . ($column['Null'] === 'YES' ? '' : ' NOT NULL') . (strpos($column['Type'], 'char') === false ? '' : ' default \'' . $column['Default'] . '\'') . ',';
-					}
-				}
+				$query_msg = array_slice($id_msg_exceeding, 0, 100);
+				$context['exceeding_messages_morethan'] = sprintf($txt['exceeding_messages_morethan'], count($id_msg_exceeding));
 			}
+			else
+				$query_msg = $id_msg_exceeding;
 
-			// Change the columns to binary form.
-			$smcFunc['db_query']('', '
-				ALTER TABLE {raw:table_name}{raw:updates_blob}',
+			$context['exceeding_messages'] = array();
+			$request = $smcFunc['db_query']('', '
+				SELECT id_msg, id_topic, subject
+				FROM {db_prefix}messages
+				WHERE id_msg IN ({array_int:messages})',
 				array(
-					'table_name' => $table_info['Name'],
-					'updates_blob' => substr($updates_blob, 0, -1),
+					'messages' => $query_msg,
 				)
 			);
-
-			// Convert the character set if MySQL has no native support for it.
-			if (isset($translation_tables[$_POST['src_charset']]))
-			{
-				$update = '';
-				foreach ($table_charsets as $charset => $columns)
-					foreach ($columns as $column)
-						$update .= '
-							' . $column['Field'] . ' = ' . strtr($replace, array('%field%' => $column['Field'])) . ',';
-
-				$smcFunc['db_query']('', '
-					UPDATE {raw:table_name}
-					SET {raw:updates}',
-					array(
-						'table_name' => $table_info['Name'],
-						'updates' => substr($update, 0, -1),
-					)
-				);
-			}
-
-			// Change the columns back, but with the proper character set.
-			$smcFunc['db_query']('', '
-				ALTER TABLE {raw:table_name}{raw:updates_text}',
-				array(
-					'table_name' => $table_info['Name'],
-					'updates_text' => substr($updates_text, 0, -1),
-				)
-			);
+			while ($row = $smcFunc['db_fetch_assoc']($request))
+				$context['exceeding_messages'][] = '<a href="' . $scripturl . '?topic=' . $row['id_topic'] . '.msg' . $row['id_msg'] . '#msg' . $row['id_msg'] . '">' . $row['subject'] . '</a>';
+			$smcFunc['db_free_result']($request);
 		}
-
-		// Now do the actual conversion (if still needed).
-		if ($charsets[$_POST['src_charset']] !== 'utf8')
-			$smcFunc['db_query']('', '
-				ALTER TABLE {raw:table_name}
-				CONVERT TO CHARACTER SET utf8',
-				array(
-					'table_name' => $table_info['Name'],
-				)
-			);
 	}
-	$smcFunc['db_free_result']($queryTables);
-
-	// Let the settings know we have a new character set.
-	updateSettings(array('global_character_set' => 'UTF-8', 'previousCharacterSet' => (empty($translation_tables[$_POST['src_charset']])) ? $charsets[$_POST['src_charset']] : $translation_tables[$_POST['src_charset']]));
-
-	// Store it in Settings.php too because it's needed before db connection.
-	require_once($sourcedir . '/Subs-Admin.php');
-	updateSettingsFile(array('db_character_set' => '\'utf8\''));
-
-	// The conversion might have messed up some serialized strings. Fix them!
-	require_once($sourcedir . '/Subs-Charset.php');
-	fix_serialized_columns();
-
-	redirectexit('action=admin;area=maintain;done=convertutf8');
 }
 
-// Convert HTML-entities to their UTF-8 character equivalents.
+/**
+ * Converts HTML-entities to their UTF-8 character equivalents.
+ * This requires the admin_forum permission.
+ * Pre-condition: UTF-8 has been set as database and global character set.
+ *
+ * It is divided in steps of 10 seconds.
+ * This action is linked from the maintenance screen (if applicable).
+ * It is accessed by ?action=admin;area=maintain;sa=database;activity=convertentities.
+ *
+ * @uses template_convert_entities()
+ */
 function ConvertEntities()
 {
-	global $db_character_set, $modSettings, $context, $sourcedir, $smcFunc;
+	global $db_character_set, $modSettings, $context, $smcFunc, $db_type, $db_prefix;
 
 	isAllowedTo('admin_forum');
 
 	// Check to see if UTF-8 is currently the default character set.
-	if ($modSettings['global_character_set'] !== 'UTF-8' || !isset($db_character_set) || $db_character_set !== 'utf8')
+	if ($modSettings['global_character_set'] !== 'UTF-8')
 		fatal_lang_error('entity_convert_only_utf8');
 
 	// Some starting values.
@@ -743,6 +502,9 @@ function ConvertEntities()
 	// The first step is just a text screen with some explanation.
 	if ($context['first_step'])
 	{
+		validateToken('admin-maint');
+		createToken('admin-maint');
+
 		$context['sub_template'] = 'convert_entities';
 		return;
 	}
@@ -753,6 +515,9 @@ function ConvertEntities()
 
 	// Now we're actually going to convert...
 	checkSession('request');
+	validateToken('admin-maint');
+	createToken('admin-maint');
+	$context['not_done_token'] = 'admin-maint';
 
 	// A list of tables ready for conversion.
 	$tables = array(
@@ -791,28 +556,54 @@ function ConvertEntities()
 
 		// Get a list of text columns.
 		$columns = array();
-		$request = $smcFunc['db_query']('', '
-			SHOW FULL COLUMNS
-			FROM {db_prefix}' . $cur_table,
-			array(
-			)
-		);
+		if ($db_type == 'postgresql')
+			$request = $smcFunc['db_query']('', '
+				SELECT column_name "Field", data_type "Type"
+				FROM information_schema.columns
+				WHERE table_name = {string:cur_table}
+					AND (data_type = \'character varying\' or data_type = \'text\')',
+				array(
+					'cur_table' => $db_prefix . $cur_table,
+				)
+			);
+		else
+			$request = $smcFunc['db_query']('', '
+				SHOW FULL COLUMNS
+				FROM {db_prefix}{raw:cur_table}',
+				array(
+					'cur_table' => $cur_table,
+				)
+			);
 		while ($column_info = $smcFunc['db_fetch_assoc']($request))
 			if (strpos($column_info['Type'], 'text') !== false || strpos($column_info['Type'], 'char') !== false)
 				$columns[] = strtolower($column_info['Field']);
 
 		// Get the column with the (first) primary key.
-		$request = $smcFunc['db_query']('', '
-			SHOW KEYS
-			FROM {db_prefix}' . $cur_table,
-			array(
-			)
-		);
+		if ($db_type == 'postgresql')
+			$request = $smcFunc['db_query']('', '
+				SELECT a.attname "Column_name", \'PRIMARY\' "Key_name", attnum "Seq_in_index"
+				FROM   pg_index i
+				JOIN   pg_attribute a ON a.attrelid = i.indrelid
+					AND a.attnum = ANY(i.indkey)
+				WHERE  i.indrelid = {string:cur_table}::regclass
+					AND    i.indisprimary',
+				array(
+					'cur_table' => $db_prefix . $cur_table,
+				)
+			);
+		else
+			$request = $smcFunc['db_query']('', '
+				SHOW KEYS
+				FROM {db_prefix}{raw:cur_table}',
+				array(
+					'cur_table' => $cur_table,
+				)
+			);
 		while ($row = $smcFunc['db_fetch_assoc']($request))
 		{
 			if ($row['Key_name'] === 'PRIMARY')
 			{
-				if (empty($primary_key) || ($row['Seq_in_index'] == 1 && !in_array(strtolower($row['Column_name']), $columns)))
+				if ((empty($primary_key) || $row['Seq_in_index'] == 1) && !in_array(strtolower($row['Column_name']), $columns))
 					$primary_key = $row['Column_name'];
 
 				$primary_keys[] = $row['Column_name'];
@@ -825,20 +616,22 @@ function ConvertEntities()
 		if (empty($primary_key) || empty($columns))
 			continue;
 
-		// Get the count of records.
+		// Get the maximum value for the primary key.
 		$request = $smcFunc['db_query']('', '
-			SELECT COUNT(*)
-			FROM {db_prefix}' . $cur_table,
+			SELECT MAX({identifier:key})
+			FROM {db_prefix}{raw:cur_table}',
 			array(
+				'key' => $primary_key,
+				'cur_table' => $cur_table,
 			)
 		);
-		list($rec_count) = $smcFunc['db_fetch_row']($request);
+		list($max_value) = $smcFunc['db_fetch_row']($request);
 		$smcFunc['db_free_result']($request);
 
-		if (empty($rec_count))
+		if (empty($max_value))
 			continue;
 
-		while ($context['start'] <= $rec_count)
+		while ($context['start'] <= $max_value)
 		{
 			// Retrieve a list of rows that has at least one entity to convert.
 			$request = $smcFunc['db_query']('', '
@@ -864,7 +657,7 @@ function ConvertEntities()
 					if ($column_name !== $primary_key && strpos($column_value, '&#') !== false)
 					{
 						$changes[] = $column_name . ' = {string:changes_' . $column_name . '}';
-						$insertion_variables['changes_' . $column_name] = preg_replace_callback('~&#(\d{1,7}|x[0-9a-fA-F]{1,6});~', 'fixchardb__callback', $column_value);
+						$insertion_variables['changes_' . $column_name] = preg_replace_callback('~&#(\d{1,5}|x[0-9a-fA-F]{1,4});~', 'fixchardb__callback', $column_value);
 					}
 
 				$where = array();
@@ -892,7 +685,7 @@ function ConvertEntities()
 			if (time() - $context['start_time'] > 10)
 			{
 				// Calculate an approximation of the percentage done.
-				$context['continue_percent'] = round(100 * ($context['table'] + ($context['start'] / $rec_count)) / $context['num_tables'], 1);
+				$context['continue_percent'] = round(100 * ($context['table'] + ($context['start'] / $max_value)) / $context['num_tables'], 1);
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=database;activity=convertentities;table=' . $context['table'] . ';start=' . $context['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				return;
 			}
@@ -900,34 +693,42 @@ function ConvertEntities()
 		$context['start'] = 0;
 	}
 
-	// Make sure all serialized strings are all right.
-	require_once($sourcedir . '/Subs-Charset.php');
-	fix_serialized_columns();
-
 	// If we're here, we must be done.
 	$context['continue_percent'] = 100;
 	$context['continue_get_data'] = '?action=admin;area=maintain;sa=database;done=convertentities';
 	$context['last_step'] = true;
-	$context['continue_countdown'] = -1;
+	$context['continue_countdown'] = 3;
 }
 
-// Optimize the database's tables.
+/**
+ * Optimizes all tables in the database and lists how much was saved.
+ * It requires the admin_forum permission.
+ * It shows as the maintain_forum admin area.
+ * It is accessed from ?action=admin;area=maintain;sa=database;activity=optimize.
+ * It also updates the optimize scheduled task such that the tables are not automatically optimized again too soon.
+ *
+ * @uses template_optimize()
+ */
 function OptimizeTables()
 {
-	global $db_type, $db_name, $db_prefix, $txt, $context, $scripturl, $sourcedir, $smcFunc;
+	global $db_prefix, $txt, $context, $smcFunc;
 
 	isAllowedTo('admin_forum');
 
-	checkSession('post');
+	checkSession('request');
+
+	if (!isset($_SESSION['optimized_tables']))
+		validateToken('admin-maint');
+	else
+		validateToken('admin-optimize', 'post', false);
 
 	ignore_user_abort(true);
 	db_extend();
 
-	// Start with no tables optimized.
-	$opttab = 0;
-
 	$context['page_title'] = $txt['database_optimize'];
 	$context['sub_template'] = 'optimize';
+	$context['continue_post_data'] = '';
+	$context['continue_countdown'] = 3;
 
 	// Only optimize the tables related to this smf install, not all the tables in the db
 	$real_prefix = preg_match('~^(`?)(.+?)\\1\\.(.*?)$~', $db_prefix, $match) === 1 ? $match[3] : $db_prefix;
@@ -943,46 +744,84 @@ function OptimizeTables()
 	if ($context['num_tables'] == 0)
 		fatal_error('You appear to be running SMF in a flat file mode... fantastic!', false);
 
-	// For each table....
-	$context['optimized_tables'] = array();
-	foreach ($tables as $table)
-	{
-		// Optimize the table!  We use backticks here because it might be a custom table.
-		$data_freed = $smcFunc['db_optimize_table']($table['table_name']);
+	$_REQUEST['start'] = empty($_REQUEST['start']) ? 0 : (int) $_REQUEST['start'];
 
-		// Optimizing one sqlite table optimizes them all.
-		if ($db_type == 'sqlite')
+	// Try for extra time due to large tables.
+	@set_time_limit(100);
+
+	// For each table....
+	$_SESSION['optimized_tables'] = !empty($_SESSION['optimized_tables']) ? $_SESSION['optimized_tables'] : array();
+	for ($key = $_REQUEST['start']; $context['num_tables'] - 1; $key++)
+	{
+		if (empty($tables[$key]))
 			break;
 
+		// Continue?
+		if (microtime(true) - TIME_START > 10)
+		{
+			$_REQUEST['start'] = $key;
+			$context['continue_get_data'] = '?action=admin;area=maintain;sa=database;activity=optimize;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
+			$context['continue_percent'] = round(100 * $_REQUEST['start'] / $context['num_tables']);
+			$context['sub_template'] = 'not_done';
+			$context['page_title'] = $txt['not_done_title'];
+
+			createToken('admin-optimize');
+			$context['continue_post_data'] = '<input type="hidden" name="' . $context['admin-optimize_token_var'] . '" value="' . $context['admin-optimize_token'] . '">';
+
+			if (function_exists('apache_reset_timeout'))
+				apache_reset_timeout();
+
+			return;
+		}
+
+		// Optimize the table!  We use backticks here because it might be a custom table.
+		$data_freed = $smcFunc['db_optimize_table']($tables[$key]['table_name']);
+
 		if ($data_freed > 0)
-			$context['optimized_tables'][] = array(
-				'name' => $table['table_name'],
+			$_SESSION['optimized_tables'][] = array(
+				'name' => $tables[$key]['table_name'],
 				'data_freed' => $data_freed,
 			);
 	}
 
-	// Number of tables, etc....
+	// Number of tables, etc...
 	$txt['database_numb_tables'] = sprintf($txt['database_numb_tables'], $context['num_tables']);
-	$context['num_tables_optimized'] = count($context['optimized_tables']);
-
-	// Check that we don't auto optimise again too soon!
-	require_once($sourcedir . '/ScheduledTasks.php');
-	CalculateNextTrigger('auto_optimize', true);
+	$context['num_tables_optimized'] = count($_SESSION['optimized_tables']);
+	$context['optimized_tables'] = $_SESSION['optimized_tables'];
+	unset($_SESSION['optimized_tables']);
 }
 
-// Recount all the important board totals.
+/**
+ * Recount many forum totals that can be recounted automatically without harm.
+ * it requires the admin_forum permission.
+ * It shows the maintain_forum admin area.
+ *
+ * Totals recounted:
+ * - fixes for topics with wrong num_replies.
+ * - updates for num_posts and num_topics of all boards.
+ * - recounts instant_messages but not unread_messages.
+ * - repairs messages pointing to boards with topics pointing to other boards.
+ * - updates the last message posted in boards and children.
+ * - updates member count, latest member, topic count, and message count.
+ *
+ * The function redirects back to ?action=admin;area=maintain when complete.
+ * It is accessed via ?action=admin;area=maintain;sa=database;activity=recount.
+ */
 function AdminBoardRecount()
 {
-	global $txt, $context, $scripturl, $modSettings, $sourcedir;
-	global $time_start, $smcFunc;
+	global $txt, $context, $modSettings, $sourcedir, $smcFunc;
 
 	isAllowedTo('admin_forum');
-
 	checkSession('request');
 
+	// validate the request or the loop
+	validateToken(!isset($_REQUEST['step']) ? 'admin-maint' : 'admin-boardrecount');
+	$context['not_done_token'] = 'admin-boardrecount';
+	createToken($context['not_done_token']);
+	
 	$context['page_title'] = $txt['not_done_title'];
 	$context['continue_post_data'] = '';
-	$context['continue_countdown'] = '3';
+	$context['continue_countdown'] = 3;
 	$context['sub_template'] = 'not_done';
 
 	// Try for as much time as possible.
@@ -1013,14 +852,14 @@ function AdminBoardRecount()
 		{
 			// Recount approved messages
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ t.id_topic, MAX(t.num_replies) AS num_replies,
-					CASE WHEN COUNT(ma.id_msg) >= 1 THEN COUNT(ma.id_msg) - 1 ELSE 0 END AS real_num_replies
+				SELECT t.id_topic, MAX(t.num_replies) AS num_replies,
+					GREATEST(COUNT(ma.id_msg) - 1, 0) AS real_num_replies
 				FROM {db_prefix}topics AS t
 					LEFT JOIN {db_prefix}messages AS ma ON (ma.id_topic = t.id_topic AND ma.approved = {int:is_approved})
 				WHERE t.id_topic > {int:start}
 					AND t.id_topic <= {int:max_id}
 				GROUP BY t.id_topic
-				HAVING CASE WHEN COUNT(ma.id_msg) >= 1 THEN COUNT(ma.id_msg) - 1 ELSE 0 END != MAX(t.num_replies)',
+				HAVING GREATEST(COUNT(ma.id_msg) - 1, 0) != MAX(t.num_replies)',
 				array(
 					'is_approved' => 1,
 					'start' => $_REQUEST['start'],
@@ -1041,7 +880,7 @@ function AdminBoardRecount()
 
 			// Recount unapproved messages
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ t.id_topic, MAX(t.unapproved_posts) AS unapproved_posts,
+				SELECT t.id_topic, MAX(t.unapproved_posts) AS unapproved_posts,
 					COUNT(mu.id_msg) AS real_unapproved_posts
 				FROM {db_prefix}topics AS t
 					LEFT JOIN {db_prefix}messages AS mu ON (mu.id_topic = t.id_topic AND mu.approved = {int:not_approved})
@@ -1069,7 +908,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=0;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((100 * $_REQUEST['start'] / $max_topics) / $total_steps);
@@ -1098,7 +937,7 @@ function AdminBoardRecount()
 		while ($_REQUEST['start'] < $max_topics)
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ m.id_board, COUNT(*) AS real_num_posts
+				SELECT m.id_board, COUNT(*) AS real_num_posts
 				FROM {db_prefix}messages AS m
 				WHERE m.id_topic > {int:id_topic_min}
 					AND m.id_topic <= {int:id_topic_max}
@@ -1124,7 +963,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=1;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((200 + 100 * $_REQUEST['start'] / $max_topics) / $total_steps);
@@ -1151,7 +990,7 @@ function AdminBoardRecount()
 		while ($_REQUEST['start'] < $max_topics)
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ t.id_board, COUNT(*) AS real_num_topics
+				SELECT t.id_board, COUNT(*) AS real_num_topics
 				FROM {db_prefix}topics AS t
 				WHERE t.approved = {int:is_approved}
 					AND t.id_topic > {int:id_topic_min}
@@ -1177,7 +1016,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=2;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((300 + 100 * $_REQUEST['start'] / $max_topics) / $total_steps);
@@ -1204,7 +1043,7 @@ function AdminBoardRecount()
 		while ($_REQUEST['start'] < $max_topics)
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ m.id_board, COUNT(*) AS real_unapproved_posts
+				SELECT m.id_board, COUNT(*) AS real_unapproved_posts
 				FROM {db_prefix}messages AS m
 				WHERE m.id_topic > {int:id_topic_min}
 					AND m.id_topic <= {int:id_topic_max}
@@ -1230,7 +1069,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=3;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((400 + 100 * $_REQUEST['start'] / $max_topics) / $total_steps);
@@ -1257,7 +1096,7 @@ function AdminBoardRecount()
 		while ($_REQUEST['start'] < $max_topics)
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ t.id_board, COUNT(*) AS real_unapproved_topics
+				SELECT t.id_board, COUNT(*) AS real_unapproved_topics
 				FROM {db_prefix}topics AS t
 				WHERE t.approved = {int:is_approved}
 					AND t.id_topic > {int:id_topic_min}
@@ -1283,7 +1122,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=4;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((500 + 100 * $_REQUEST['start'] / $max_topics) / $total_steps);
@@ -1299,7 +1138,7 @@ function AdminBoardRecount()
 	if ($_REQUEST['step'] <= 5)
 	{
 		$request = $smcFunc['db_query']('', '
-			SELECT /*!40001 SQL_NO_CACHE */ mem.id_member, COUNT(pmr.id_pm) AS real_num,
+			SELECT mem.id_member, COUNT(pmr.id_pm) AS real_num,
 				MAX(mem.instant_messages) AS instant_messages
 			FROM {db_prefix}members AS mem
 				LEFT JOIN {db_prefix}pm_recipients AS pmr ON (mem.id_member = pmr.id_member AND pmr.deleted = {int:is_not_deleted})
@@ -1314,7 +1153,7 @@ function AdminBoardRecount()
 		$smcFunc['db_free_result']($request);
 
 		$request = $smcFunc['db_query']('', '
-			SELECT /*!40001 SQL_NO_CACHE */ mem.id_member, COUNT(pmr.id_pm) AS real_num,
+			SELECT mem.id_member, COUNT(pmr.id_pm) AS real_num,
 				MAX(mem.unread_messages) AS unread_messages
 			FROM {db_prefix}members AS mem
 				LEFT JOIN {db_prefix}pm_recipients AS pmr ON (mem.id_member = pmr.id_member AND pmr.deleted = {int:is_not_deleted} AND pmr.is_read = {int:is_not_read})
@@ -1329,7 +1168,7 @@ function AdminBoardRecount()
 			updateMemberData($row['id_member'], array('unread_messages' => $row['real_num']));
 		$smcFunc['db_free_result']($request);
 
-		if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+		if (microtime(true) - TIME_START > 3)
 		{
 			$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=6;start=0;' . $context['session_var'] . '=' . $context['session_id'];
 			$context['continue_percent'] = round(700 / $total_steps);
@@ -1344,7 +1183,7 @@ function AdminBoardRecount()
 		while ($_REQUEST['start'] < $modSettings['maxMsgID'])
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT /*!40001 SQL_NO_CACHE */ t.id_board, m.id_msg
+				SELECT t.id_board, m.id_msg
 				FROM {db_prefix}messages AS m
 					INNER JOIN {db_prefix}topics AS t ON (t.id_topic = m.id_topic AND t.id_board != m.id_board)
 				WHERE m.id_msg > {int:id_msg_min}
@@ -1357,6 +1196,7 @@ function AdminBoardRecount()
 			$boards = array();
 			while ($row = $smcFunc['db_fetch_assoc']($request))
 				$boards[$row['id_board']][] = $row['id_msg'];
+
 			$smcFunc['db_free_result']($request);
 
 			foreach ($boards as $board_id => $messages)
@@ -1372,7 +1212,7 @@ function AdminBoardRecount()
 
 			$_REQUEST['start'] += $increment;
 
-			if (array_sum(explode(' ', microtime())) - array_sum(explode(' ', $time_start)) > 3)
+			if (microtime(true) - TIME_START > 3)
 			{
 				$context['continue_get_data'] = '?action=admin;area=maintain;sa=routine;activity=recount;step=6;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 				$context['continue_percent'] = round((700 + 100 * $_REQUEST['start'] / $modSettings['maxMsgID']) / $total_steps);
@@ -1400,7 +1240,7 @@ function AdminBoardRecount()
 	$smcFunc['db_free_result']($request);
 
 	$request = $smcFunc['db_query']('', '
-		SELECT /*!40001 SQL_NO_CACHE */ id_board, id_parent, id_last_msg, child_level, id_msg_updated
+		SELECT id_board, id_parent, id_last_msg, child_level, id_msg_updated
 		FROM {db_prefix}boards',
 		array(
 		)
@@ -1457,10 +1297,21 @@ function AdminBoardRecount()
 	redirectexit('action=admin;area=maintain;sa=routine;done=recount');
 }
 
-// Perform a detailed version check.  A very good thing ;).
+/**
+ * Perform a detailed version check.  A very good thing ;).
+ * The function parses the comment headers in all files for their version information,
+ * and outputs that for some javascript to check with simplemachines.org.
+ * It does not connect directly with simplemachines.org, but rather expects the client to.
+ *
+ * It requires the admin_forum permission.
+ * Uses the view_versions admin area.
+ * Accessed through ?action=admin;area=maintain;sa=routine;activity=version.
+ *
+ * @uses template_view_versions()
+ */
 function VersionDetail()
 {
-	global $forum_version, $txt, $sourcedir, $context;
+	global $txt, $sourcedir, $context;
 
 	isAllowedTo('admin_forum');
 
@@ -1469,6 +1320,7 @@ function VersionDetail()
 	$versionOptions = array(
 		'include_ssi' => true,
 		'include_subscriptions' => true,
+		'include_tasks' => true,
 		'sort_results' => true,
 	);
 	$version_info = getFileVersions($versionOptions);
@@ -1480,16 +1332,19 @@ function VersionDetail()
 		'template_versions' => $version_info['template_versions'],
 		'default_language_versions' => $version_info['default_language_versions'],
 		'default_known_languages' => array_keys($version_info['default_language_versions']),
+		'tasks_versions' => $version_info['tasks_versions'],
 	);
 
 	// Make it easier to manage for the template.
-	$context['forum_version'] = $forum_version;
+	$context['forum_version'] = SMF_FULL_VERSION;
 
 	$context['sub_template'] = 'view_versions';
 	$context['page_title'] = $txt['admin_version_check'];
 }
 
-// Removing old posts doesn't take much as we really pass through.
+/**
+ * Re-attribute posts.
+ */
 function MaintainReattributePosts()
 {
 	global $sourcedir, $context, $txt;
@@ -1516,16 +1371,11 @@ function MaintainReattributePosts()
 	$context['maintenance_finished'] = $txt['maintain_reattribute_posts'];
 }
 
-// Handling function for the backup stuff.
-function MaintainDownloadBackup()
-{
-	global $sourcedir;
-
-	require_once($sourcedir . '/DumpDatabase.php');
-	DumpDatabase2();
-}
-
-// Removing old members?
+/**
+ * Removing old members. Done and out!
+ *
+ * @todo refactor
+ */
 function MaintainPurgeInactiveMembers()
 {
 	global $sourcedir, $context, $smcFunc, $txt;
@@ -1534,6 +1384,7 @@ function MaintainPurgeInactiveMembers()
 	if (!empty($_POST['groups']) && $_POST['maxdays'] > 0)
 	{
 		checkSession();
+		validateToken('admin-maint');
 
 		$groups = array();
 		foreach ($_POST['groups'] as $id => $dummy)
@@ -1548,7 +1399,7 @@ function MaintainPurgeInactiveMembers()
 			$where_vars['is_activated'] = 0;
 		}
 		else
-			$where = 'mem.last_login < {int:time_limit}';
+			$where = 'mem.last_login < {int:time_limit} AND (mem.last_login != 0 OR mem.date_registered < {int:time_limit})';
 
 		// Need to get *all* groups then work out which (if any) we avoid.
 		$request = $smcFunc['db_query']('', '
@@ -1586,7 +1437,7 @@ function MaintainPurgeInactiveMembers()
 
 		// Select all the members we're about to murder/remove...
 		$request = $smcFunc['db_query']('', '
-			SELECT mem.id_member, IFNULL(m.id_member, 0) AS is_mod
+			SELECT mem.id_member, COALESCE(m.id_member, 0) AS is_mod
 			FROM {db_prefix}members AS mem
 				LEFT JOIN {db_prefix}moderators AS m ON (m.id_member = mem.id_member)
 			WHERE ' . $where,
@@ -1605,18 +1456,61 @@ function MaintainPurgeInactiveMembers()
 	}
 
 	$context['maintenance_finished'] = $txt['maintain_members'];
+	createToken('admin-maint');
 }
 
-// Removing old posts doesn't take much as we really pass through.
+/**
+ * Removing old posts doesn't take much as we really pass through.
+ */
 function MaintainRemoveOldPosts()
 {
-	global $sourcedir, $context, $txt;
+	global $sourcedir;
+
+	validateToken('admin-maint');
 
 	// Actually do what we're told!
 	require_once($sourcedir . '/RemoveTopic.php');
 	RemoveOldTopics2();
 }
 
+/**
+ * Removing old drafts
+ */
+function MaintainRemoveOldDrafts()
+{
+	global $sourcedir, $smcFunc;
+
+	validateToken('admin-maint');
+
+	$drafts = array();
+
+	// Find all of the old drafts
+	$request = $smcFunc['db_query']('', '
+		SELECT id_draft
+		FROM {db_prefix}user_drafts
+		WHERE poster_time <= {int:poster_time_old}',
+		array(
+			'poster_time_old' => time() - (86400 * $_POST['draftdays']),
+		)
+	);
+
+	while ($row = $smcFunc['db_fetch_row']($request))
+		$drafts[] = (int) $row[0];
+	$smcFunc['db_free_result']($request);
+
+	// If we have old drafts, remove them
+	if (count($drafts) > 0)
+	{
+		require_once($sourcedir . '/Drafts.php');
+		DeleteDraft($drafts, false);
+	}
+}
+
+/**
+ * Moves topics from one board to another.
+ *
+ * @uses template_not_done() to pause the process.
+ */
 function MaintainMassMoveTopics()
 {
 	global $smcFunc, $sourcedir, $context, $txt;
@@ -1625,10 +1519,11 @@ function MaintainMassMoveTopics()
 	isAllowedTo('admin_forum');
 
 	checkSession('request');
+	validateToken('admin-maint');
 
 	// Set up to the context.
 	$context['page_title'] = $txt['not_done_title'];
-	$context['continue_countdown'] = '3';
+	$context['continue_countdown'] = 3;
 	$context['continue_post_data'] = '';
 	$context['continue_get_data'] = '';
 	$context['sub_template'] = 'not_done';
@@ -1636,23 +1531,59 @@ function MaintainMassMoveTopics()
 	$context['start_time'] = time();
 
 	// First time we do this?
-	$id_board_from = isset($_POST['id_board_from']) ? (int) $_POST['id_board_from'] : (int) $_REQUEST['id_board_from'];
-	$id_board_to = isset($_POST['id_board_to']) ? (int) $_POST['id_board_to'] : (int) $_REQUEST['id_board_to'];
+	$id_board_from = isset($_REQUEST['id_board_from']) ? (int) $_REQUEST['id_board_from'] : 0;
+	$id_board_to = isset($_REQUEST['id_board_to']) ? (int) $_REQUEST['id_board_to'] : 0;
+	$max_days = isset($_REQUEST['maxdays']) ? (int) $_REQUEST['maxdays'] : 0;
+	$locked = isset($_POST['move_type_locked']) || isset($_GET['locked']);
+	$sticky = isset($_POST['move_type_sticky']) || isset($_GET['sticky']);
 
 	// No boards then this is your stop.
 	if (empty($id_board_from) || empty($id_board_to))
 		return;
+
+	// The big WHERE clause
+	$conditions = 'WHERE t.id_board = {int:id_board_from}
+		AND m.icon != {string:moved}';
+
+	// DB parameters
+	$params = array(
+		'id_board_from' => $id_board_from,
+		'moved' => 'moved',
+	);
+
+	// Only moving topics not posted in for x days?
+	if (!empty($max_days))
+	{
+		$conditions .= '
+			AND m.poster_time < {int:poster_time}';
+		$params['poster_time'] = time() - 3600 * 24 * $max_days;
+	}
+
+	// Moving locked topics?
+	if ($locked)
+	{
+		$conditions .= '
+			AND t.locked = {int:locked}';
+		$params['locked'] = 1;
+	}
+
+	// What about sticky topics?
+	if ($sticky)
+	{
+		$conditions .= '
+			AND t.is_sticky = {int:sticky}';
+		$params['sticky'] = 1;
+	}
 
 	// How many topics are we converting?
 	if (!isset($_REQUEST['totaltopics']))
 	{
 		$request = $smcFunc['db_query']('', '
 			SELECT COUNT(*)
-			FROM {db_prefix}topics
-			WHERE id_board = {int:id_board_from}',
-			array(
-				'id_board_from' => $id_board_from,
-			)
+			FROM {db_prefix}topics AS t
+				INNER JOIN {db_prefix}messages AS m ON (m.id_msg = t.id_last_msg)' .
+			$conditions,
+			$params
 		);
 		list ($total_topics) = $smcFunc['db_fetch_row']($request);
 		$smcFunc['db_free_result']($request);
@@ -1661,7 +1592,15 @@ function MaintainMassMoveTopics()
 		$total_topics = (int) $_REQUEST['totaltopics'];
 
 	// Seems like we need this here.
-	$context['continue_get_data'] = '?action=admin;area=maintain;sa=topics;activity=massmove;id_board_from=' . $id_board_from . ';id_board_to=' . $id_board_to . ';totaltopics=' . $total_topics . ';start=' . $context['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
+	$context['continue_get_data'] = '?action=admin;area=maintain;sa=topics;activity=massmove;id_board_from=' . $id_board_from . ';id_board_to=' . $id_board_to . ';totaltopics=' . $total_topics . ';max_days=' . $max_days;
+
+	if ($locked)
+		$context['continue_get_data'] .= ';locked';
+
+	if ($sticky)
+		$context['continue_get_data'] .= ';sticky';
+
+	$context['continue_get_data'] .= ';start=' . $context['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
 
 	// We have topics to move so start the process.
 	if (!empty($total_topics))
@@ -1670,13 +1609,12 @@ function MaintainMassMoveTopics()
 		{
 			// Lets get the topics.
 			$request = $smcFunc['db_query']('', '
-				SELECT id_topic
-				FROM {db_prefix}topics
-				WHERE id_board = {int:id_board_from}
+				SELECT t.id_topic
+				FROM {db_prefix}topics AS t
+					INNER JOIN {db_prefix}messages AS m ON (m.id_msg = t.id_last_msg)
+				' . $conditions . '
 				LIMIT 10',
-				array(
-					'id_board_from' => $id_board_from,
-				)
+				$params
 			);
 
 			// Get the ids.
@@ -1717,6 +1655,626 @@ function MaintainMassMoveTopics()
 	cache_put_data('board-' . $id_board_to, null, 120);
 
 	redirectexit('action=admin;area=maintain;sa=topics;done=massmove');
+}
+
+/**
+ * Recalculate all members post counts
+ * it requires the admin_forum permission.
+ *
+ * - recounts all posts for members found in the message table
+ * - updates the members post count record in the members table
+ * - honors the boards post count flag
+ * - does not count posts in the recycle bin
+ * - zeros post counts for all members with no posts in the message table
+ * - runs as a delayed loop to avoid server overload
+ * - uses the not_done template in Admin.template
+ *
+ * The function redirects back to action=admin;area=maintain;sa=members when complete.
+ * It is accessed via ?action=admin;area=maintain;sa=members;activity=recountposts
+ */
+function MaintainRecountPosts()
+{
+	global $txt, $context, $modSettings, $smcFunc;
+
+	// You have to be allowed in here
+	isAllowedTo('admin_forum');
+	checkSession('request');
+
+	// Set up to the context.
+	$context['page_title'] = $txt['not_done_title'];
+	$context['continue_countdown'] = 3;
+	$context['continue_get_data'] = '';
+	$context['sub_template'] = 'not_done';
+
+	// init
+	$increment = 200;
+	$_REQUEST['start'] = !isset($_REQUEST['start']) ? 0 : (int) $_REQUEST['start'];
+
+	// Ask for some extra time, on big boards this may take a bit
+	@set_time_limit(600);
+
+	// Only run this query if we don't have the total number of members that have posted
+	if (!isset($_SESSION['total_members']))
+	{
+		validateToken('admin-maint');
+
+		$request = $smcFunc['db_query']('', '
+			SELECT COUNT(DISTINCT m.id_member)
+			FROM {db_prefix}messages AS m
+			JOIN {db_prefix}boards AS b on m.id_board = b.id_board
+			WHERE m.id_member != 0
+				AND b.count_posts = 0',
+			array(
+			)
+		);
+
+		// save it so we don't do this again for this task
+		list ($_SESSION['total_members']) = $smcFunc['db_fetch_row']($request);
+		$smcFunc['db_free_result']($request);
+	}
+	else
+		validateToken('admin-recountposts');
+
+	// Lets get a group of members and determine their post count (from the boards that have post count enabled of course).
+	$request = $smcFunc['db_query']('', '
+		SELECT m.id_member, COUNT(*) AS posts
+		FROM {db_prefix}messages AS m
+			INNER JOIN {db_prefix}boards AS b ON m.id_board = b.id_board
+		WHERE m.id_member != {int:zero}
+			AND b.count_posts = {int:zero}
+			' . (!empty($modSettings['recycle_enable']) ? ' AND b.id_board != {int:recycle}' : '') . '
+		GROUP BY m.id_member
+		LIMIT {int:start}, {int:number}',
+		array(
+			'start' => $_REQUEST['start'],
+			'number' => $increment,
+			'recycle' => $modSettings['recycle_board'],
+			'zero' => 0,
+		)
+	);
+	$total_rows = $smcFunc['db_num_rows']($request);
+
+	// Update the post count for this group
+	while ($row = $smcFunc['db_fetch_assoc']($request))
+	{
+		$smcFunc['db_query']('', '
+			UPDATE {db_prefix}members
+			SET posts = {int:posts}
+			WHERE id_member = {int:row}',
+			array(
+				'row' => $row['id_member'],
+				'posts' => $row['posts'],
+			)
+		);
+	}
+	$smcFunc['db_free_result']($request);
+
+	// Continue?
+	if ($total_rows == $increment)
+	{
+		$_REQUEST['start'] += $increment;
+		$context['continue_get_data'] = '?action=admin;area=maintain;sa=members;activity=recountposts;start=' . $_REQUEST['start'] . ';' . $context['session_var'] . '=' . $context['session_id'];
+		$context['continue_percent'] = round(100 * $_REQUEST['start'] / $_SESSION['total_members']);
+
+		createToken('admin-recountposts');
+		$context['continue_post_data'] = '<input type="hidden" name="' . $context['admin-recountposts_token_var'] . '" value="' . $context['admin-recountposts_token'] . '">';
+
+		if (function_exists('apache_reset_timeout'))
+			apache_reset_timeout();
+		return;
+	}
+
+	// final steps ... made more difficult since we don't yet support sub-selects on joins
+	// place all members who have posts in the message table in a temp table
+	$createTemporary = $smcFunc['db_query']('', '
+		CREATE TEMPORARY TABLE {db_prefix}tmp_maint_recountposts (
+			id_member mediumint(8) unsigned NOT NULL default {string:string_zero},
+			PRIMARY KEY (id_member)
+		)
+		SELECT m.id_member
+		FROM {db_prefix}messages AS m
+			INNER JOIN {db_prefix}boards AS b ON m.id_board = b.id_board
+		WHERE m.id_member != {int:zero}
+			AND b.count_posts = {int:zero}
+			' . (!empty($modSettings['recycle_enable']) ? ' AND b.id_board != {int:recycle}' : '') . '
+		GROUP BY m.id_member',
+		array(
+			'zero' => 0,
+			'string_zero' => '0',
+			'db_error_skip' => true,
+			'recycle' => !empty($modSettings['recycle_board']) ? $modSettings['recycle_board'] : 0,
+		)
+	) !== false;
+
+	if ($createTemporary)
+	{
+		// outer join the members table on the temporary table finding the members that have a post count but no posts in the message table
+		$request = $smcFunc['db_query']('', '
+			SELECT mem.id_member, mem.posts
+			FROM {db_prefix}members AS mem
+				LEFT OUTER JOIN {db_prefix}tmp_maint_recountposts AS res
+				ON res.id_member = mem.id_member
+			WHERE res.id_member IS null
+				AND mem.posts != {int:zero}',
+			array(
+				'zero' => 0,
+			)
+		);
+
+		// set the post count to zero for any delinquents we may have found
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+		{
+			$smcFunc['db_query']('', '
+				UPDATE {db_prefix}members
+				SET posts = {int:zero}
+				WHERE id_member = {int:row}',
+				array(
+					'row' => $row['id_member'],
+					'zero' => 0,
+				)
+			);
+		}
+		$smcFunc['db_free_result']($request);
+	}
+
+	// all done
+	unset($_SESSION['total_members']);
+	$context['maintenance_finished'] = $txt['maintain_recountposts'];
+	redirectexit('action=admin;area=maintain;sa=members;done=recountposts');
+}
+
+function RebuildSettingsFile()
+{
+	global $sourcedir;
+
+	isAllowedTo('admin_forum');
+
+	require_once($sourcedir . '/Subs-Admin.php');
+	updateSettingsFile(array(), false, true);
+
+	redirectexit('action=admin;area=maintain;sa=routine;done=rebuild_settings');
+}
+
+/**
+ * Generates a list of integration hooks for display
+ * Accessed through ?action=admin;area=maintain;sa=hooks;
+ * Allows for removal or disabling of selected hooks
+ */
+function list_integration_hooks()
+{
+	global $boarddir, $sourcedir, $scripturl, $context, $txt;
+
+	$filter_url = '';
+	$current_filter = '';
+	$hooks = get_integration_hooks();
+	$hooks_filters = array();
+
+	if (isset($_GET['filter'], $hooks[$_GET['filter']]))
+	{
+		$filter_url = ';filter=' . $_GET['filter'];
+		$current_filter = $_GET['filter'];
+	}
+	$filtered_hooks = array_filter(
+		$hooks,
+		function($hook) use ($current_filter)
+		{
+			return $current_filter == '' || $current_filter == $hook;
+		},
+		ARRAY_FILTER_USE_KEY
+	);
+	ksort($hooks);
+
+	foreach ($hooks as $hook => $functions)
+		$hooks_filters[] = '<option' . ($current_filter == $hook ? ' selected ' : '') . ' value="' . $hook . '">' . $hook . '</option>';
+
+	if (!empty($hooks_filters))
+		$context['insert_after_template'] .= '
+		<script>
+			var hook_name_header = document.getElementById(\'header_list_integration_hooks_hook_name\');
+			hook_name_header.innerHTML += ' . JavaScriptEscape('<select style="margin-left:15px;" onchange="window.location=(\'' . $scripturl . '?action=admin;area=maintain;sa=hooks\' + (this.value ? \';filter=\' + this.value : \'\'));"><option value="">' . $txt['hooks_reset_filter'] . '</option>' . implode('', $hooks_filters) . '</select>') . ';
+		</script>';
+
+	if (!empty($_REQUEST['do']) && isset($_REQUEST['hook']) && isset($_REQUEST['function']))
+	{
+		checkSession('request');
+		validateToken('admin-hook', 'request');
+
+		if ($_REQUEST['do'] == 'remove')
+			remove_integration_function($_REQUEST['hook'], urldecode($_REQUEST['function']));
+
+		else
+		{
+			// Disable/enable logic; always remove exactly what was passed
+			$function_remove = urldecode($_REQUEST['function']);
+			$function_add = urldecode(rtrim($_REQUEST['function'], '!')) . (($_REQUEST['do'] == 'disable') ? '!' : '');
+
+			remove_integration_function($_REQUEST['hook'], $function_remove);
+			add_integration_function($_REQUEST['hook'], $function_add);
+		}
+
+		redirectexit('action=admin;area=maintain;sa=hooks' . $filter_url);
+	}
+
+	createToken('admin-hook', 'request');
+
+	$list_options = array(
+		'id' => 'list_integration_hooks',
+		'title' => $txt['hooks_title_list'],
+		'items_per_page' => 20,
+		'base_href' => $scripturl . '?action=admin;area=maintain;sa=hooks' . $filter_url . ';' . $context['session_var'] . '=' . $context['session_id'],
+		'default_sort_col' => 'hook_name',
+		'get_items' => array(
+			'function' => 'get_integration_hooks_data',
+			'params' => array(
+				$filtered_hooks,
+				strtr($boarddir, '\\', '/'),
+				strtr($sourcedir, '\\', '/'),
+			),
+		),
+		'get_count' => array(
+			'value' => array_reduce(
+				$filtered_hooks,
+				function($accumulator, $functions)
+				{
+					return $accumulator + count($functions);
+				},
+				0
+			),
+		),
+		'no_items_label' => $txt['hooks_no_hooks'],
+		'columns' => array(
+			'hook_name' => array(
+				'header' => array(
+					'value' => $txt['hooks_field_hook_name'],
+				),
+				'data' => array(
+					'db' => 'hook_name',
+				),
+				'sort' => array(
+					'default' => 'hook_name',
+					'reverse' => 'hook_name DESC',
+				),
+			),
+			'function_name' => array(
+				'header' => array(
+					'value' => $txt['hooks_field_function_name'],
+				),
+				'data' => array(
+					'function' => function($data) use ($txt)
+					{
+						// Show a nice icon to indicate this is an instance.
+						$instance = (!empty($data['instance']) ? '<span class="main_icons news" title="' . $txt['hooks_field_function_method'] . '"></span> ' : '');
+
+						if (!empty($data['included_file']) && !empty($data['real_function']))
+							return $instance . $txt['hooks_field_function'] . ': ' . $data['real_function'] . '<br>' . $txt['hooks_field_included_file'] . ': ' . $data['included_file'];
+
+						else
+							return $instance . $data['real_function'];
+					},
+				),
+				'sort' => array(
+					'default' => 'function_name',
+					'reverse' => 'function_name DESC',
+				),
+			),
+			'file_name' => array(
+				'header' => array(
+					'value' => $txt['hooks_field_file_name'],
+				),
+				'data' => array(
+					'db' => 'file_name',
+				),
+				'sort' => array(
+					'default' => 'file_name',
+					'reverse' => 'file_name DESC',
+				),
+			),
+			'status' => array(
+				'header' => array(
+					'value' => $txt['hooks_field_hook_exists'],
+					'style' => 'width:3%;',
+				),
+				'data' => array(
+					'function' => function($data) use ($txt, $scripturl, $context, $filter_url)
+					{
+						// Cannot update temp hooks in any way, really.  Just show the appropriate icon.
+						if ($data['status'] == 'temp')
+						{
+							return '<span class="main_icons ' . ($data['hook_exists'] ? 'posts' : 'error') . '" title="' . $data['img_text'] . '"></span>';
+						}
+						else
+						{
+							$change_status = array('before' => '', 'after' => '');
+
+							// Can only enable/disable if it exists...
+							if ($data['hook_exists'])
+							{
+								$change_status['before'] = '<a href="' . $scripturl . '?action=admin;area=maintain;sa=hooks;do=' . ($data['enabled'] ? 'disable' : 'enable') . ';hook=' . $data['hook_name'] . ';function=' . urlencode($data['function_name']) . $filter_url . ';' . $context['admin-hook_token_var'] . '=' . $context['admin-hook_token'] . ';' . $context['session_var'] . '=' . $context['session_id'] . '" data-confirm="' . $txt['quickmod_confirm'] . '" class="you_sure">';
+								$change_status['after'] = '</a>';
+							}
+
+							return $change_status['before'] . '<span class="main_icons post_moderation_' . $data['status'] . '" title="' . $data['img_text'] . '"></span>' . $change_status['after'];
+						}
+					},
+					'class' => 'centertext',
+				),
+				'sort' => array(
+					'default' => 'status',
+					'reverse' => 'status DESC',
+				),
+			),
+		),
+		'additional_rows' => array(
+			array(
+				'position' => 'after_title',
+				'value' => $txt['hooks_disable_instructions'] . '<br>
+					' . $txt['hooks_disable_legend'] . ':
+				<ul style="list-style: none;">
+					<li><span class="main_icons post_moderation_allow"></span> ' . $txt['hooks_disable_legend_exists'] . '</li>
+					<li><span class="main_icons post_moderation_moderate"></span> ' . $txt['hooks_disable_legend_disabled'] . '</li>
+					<li><span class="main_icons post_moderation_deny"></span> ' . $txt['hooks_disable_legend_missing'] . '</li>
+					<li><span class="main_icons posts"></span> ' . $txt['hooks_disable_legend_temp'] . '</li>
+					<li><span class="main_icons error"></span> ' . $txt['hooks_disable_legend_temp_missing'] . '</li>
+				</ul>'
+			),
+		),
+	);
+
+	$list_options['columns']['remove'] = array(
+		'header' => array(
+			'value' => $txt['hooks_button_remove'],
+			'style' => 'width:3%',
+		),
+		'data' => array(
+			'function' => function($data) use ($txt, $scripturl, $context, $filter_url)
+			{
+				// Note: Cannot remove temp hooks via the UI...
+				if (!$data['hook_exists'] && $data['status'] != 'temp')
+					return '
+					<a href="' . $scripturl . '?action=admin;area=maintain;sa=hooks;do=remove;hook=' . $data['hook_name'] . ';function=' . urlencode($data['function_name']) . $filter_url . ';' . $context['admin-hook_token_var'] . '=' . $context['admin-hook_token'] . ';' . $context['session_var'] . '=' . $context['session_id'] . '" data-confirm="' . $txt['quickmod_confirm'] . '" class="you_sure">
+						<span class="main_icons delete" title="' . $txt['hooks_button_remove'] . '"></span>
+					</a>';
+			},
+			'class' => 'centertext',
+		),
+	);
+	$list_options['form'] = array(
+		'href' => $scripturl . '?action=admin;area=maintain;sa=hooks' . $filter_url . ';' . $context['session_var'] . '=' . $context['session_id'],
+		'name' => 'list_integration_hooks',
+	);
+
+	require_once($sourcedir . '/Subs-List.php');
+	createList($list_options);
+
+	$context['page_title'] = $txt['hooks_title_list'];
+	$context['sub_template'] = 'show_list';
+	$context['default_list'] = 'list_integration_hooks';
+}
+
+/**
+ * Gets all of the files in a directory and its children directories
+ *
+ * @param string $dirname The path to the directory
+ * @return array An array containing information about the files found in the specified directory and its children
+ */
+function get_files_recursive(string $dirname): array
+{
+	return iterator_to_array(
+		new RecursiveIteratorIterator(
+			new RecursiveCallbackFilterIterator(
+				new RecursiveDirectoryIterator($dirname, FilesystemIterator::UNIX_PATHS),
+				function ($fileInfo, $currentFile, $iterator)
+				{
+					// Allow recursion
+					if ($iterator->hasChildren())
+						return true;
+					return $fileInfo->getExtension() == 'php';
+				}
+			)
+		)
+	);
+}
+
+/**
+ * Callback function for the integration hooks list (list_integration_hooks)
+ * Gets all of the hooks in the system and their status
+ *
+ * @param int $start The item to start with (for pagination purposes)
+ * @param int $per_page How many items to display on each page
+ * @param string $sort A string indicating how to sort things
+ * @return array An array of information about the integration hooks
+ */
+function get_integration_hooks_data($start, $per_page, $sort, $filtered_hooks, $normalized_boarddir, $normalized_sourcedir)
+{
+	global $settings, $txt, $context, $scripturl;
+
+	$function_list = $sort_array = $temp_data = array();
+	$files = get_files_recursive($normalized_sourcedir);
+	foreach ($files as $currentFile => $fileInfo)
+		$function_list += get_defined_functions_in_file($currentFile);
+
+	$sort_types = array(
+		'hook_name' => array('hook_name', SORT_ASC),
+		'hook_name DESC' => array('hook_name', SORT_DESC),
+		'function_name' => array('function_name', SORT_ASC),
+		'function_name DESC' => array('function_name', SORT_DESC),
+		'file_name' => array('file_name', SORT_ASC),
+		'file_name DESC' => array('file_name', SORT_DESC),
+		'status' => array('status', SORT_ASC),
+		'status DESC' => array('status', SORT_DESC),
+	);
+
+	foreach ($filtered_hooks as $hook => $functions)
+		foreach ($functions as $rawFunc)
+		{
+			$hookParsedData = parse_integration_hook($hook, $rawFunc);
+
+			// Handle hooks pointing outside the sources directory.
+			$absPath_clean =  rtrim($hookParsedData['absPath'], '!');
+			if ($absPath_clean != '' && !isset($files[$absPath_clean]) && file_exists($absPath_clean))
+				$function_list += get_defined_functions_in_file($absPath_clean);
+
+			$hook_exists = isset($function_list[$hookParsedData['call']]) || (substr($hook, -8) === '_include' && isset($files[$absPath_clean]));
+			$hook_temp = !empty($context['integration_hooks_temporary'][$hook][$hookParsedData['rawData']]);
+			$temp = array(
+				'hook_name' => $hook,
+				'function_name' => $hookParsedData['rawData'],
+				'real_function' => $hookParsedData['call'],
+				'included_file' => $hookParsedData['hookFile'],
+				'file_name' => strtr($hookParsedData['absPath'] ?: ($function_list[$hookParsedData['call']] ?? ''), [$normalized_boarddir => '.']),
+				'instance' => $hookParsedData['object'],
+				'hook_exists' => $hook_exists,
+				'status' => ($hook_temp ? 'temp' : ($hook_exists ? ($hookParsedData['enabled'] ? 'allow' : 'moderate') : 'deny')),
+				'img_text' => $txt['hooks_' . ($hook_exists ? ($hook_temp ? 'temp' : ($hookParsedData['enabled'] ? 'active' : 'disabled')) : 'missing')],
+				'enabled' => $hookParsedData['enabled'],
+			);
+			$sort_array[] = $temp[$sort_types[$sort][0]];
+			$temp_data[] = $temp;
+		}
+
+	array_multisort($sort_array, $sort_types[$sort][1], $temp_data);
+
+	return array_slice($temp_data, $start, $per_page, true);
+}
+
+/**
+ * Parses modSettings to create integration hook array
+ *
+ * @return array An array of information about the integration hooks
+ */
+function get_integration_hooks()
+{
+	global $modSettings;
+	static $integration_hooks;
+
+	if (!isset($integration_hooks))
+	{
+		$integration_hooks = array();
+		foreach ($modSettings as $key => $value)
+		{
+			if (!empty($value) && substr($key, 0, 10) === 'integrate_')
+				$integration_hooks[$key] = explode(',', $value);
+		}
+	}
+
+	return $integration_hooks;
+}
+
+/**
+ * Parses each hook data and returns an array.
+ *
+ * @param string $hook
+ * @param string $rawData A string as it was saved to the DB.
+ * @return array everything found in the string itself
+ */
+function parse_integration_hook(string $hook, string $rawData)
+{
+	global $boarddir, $settings, $sourcedir;
+
+	// A single string can hold tons of info!
+	$hookData = array(
+		'object' => false,
+		'enabled' => true,
+		'absPath' => '',
+		'hookFile' => '',
+		'pureFunc' => '',
+		'method' => '',
+		'class' => '',
+		'call' => '',
+		'rawData' => $rawData,
+	);
+
+	// Meh...
+	if (empty($rawData))
+		return $hookData;
+
+	$modFunc = $rawData;
+
+	// Any files?
+	if (substr($hook, -8) === '_include')
+		$modFunc = $modFunc . '|';
+	if (strpos($modFunc, '|') !== false)
+	{
+		list ($hookData['hookFile'], $modFunc) = explode('|', $modFunc);
+		$hookData['absPath'] = strtr(strtr(trim($hookData['hookFile']), array('$boarddir' => $boarddir, '$sourcedir' => $sourcedir, '$themedir' => $settings['theme_dir'] ?? '')), '\\', '/');
+	}
+
+	// Hook is an instance.
+	if (strpos($modFunc, '#') !== false)
+	{
+		$modFunc = str_replace('#', '', $modFunc);
+		$hookData['object'] = true;
+	}
+
+	// Hook is "disabled"
+	// May need to inspect $rawData here for includes...
+	if ((strpos($modFunc, '!') !== false) || (empty($modFunc) && (strpos($rawData, '!') !== false)))
+	{
+		$modFunc = str_replace('!', '', $modFunc);
+		$hookData['enabled'] = false;
+	}
+
+	// Handling methods?
+	if (strpos($modFunc, '::') !== false)
+	{
+		list ($hookData['class'], $hookData['method']) = explode('::', $modFunc);
+		$hookData['pureFunc'] = $hookData['method'];
+		$hookData['call'] = $modFunc;
+	}
+
+	else
+		$hookData['call'] = $hookData['pureFunc'] = $modFunc;
+
+	return $hookData;
+}
+
+function get_defined_functions_in_file(string $file): array
+{
+	$source = file_get_contents($file);
+	// token_get_all() is too slow so use a nice little regex instead.
+	preg_match_all('/\bnamespace\s++((?P>label)(?:\\\(?P>label))*+)\s*+;|\bclass\s++((?P>label))[\w\s]*+{|\bfunction\s++((?P>label))\s*+\(.*\)[:\|\w\s]*+{(?(DEFINE)(?<label>[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*+))/i', $source, $matches, PREG_SET_ORDER);
+
+	$functions = array();
+	$namespace = '';
+	$class = '';
+
+	foreach ($matches as $match)
+	{
+		if (!empty($match[1]))
+			$namespace = $match[1] . '\\';
+		elseif (!empty($match[2]))
+			$class = $namespace . $match[2] . '::';
+		elseif (!empty($match[3]))
+			$functions[$class . $match[3]] = $file;
+	}
+
+	return $functions;
+}
+
+/**
+ * Converts html entities to utf8 equivalents
+ * special db wrapper for mysql based on the limitation of mysql/mb3
+ *
+ * Callback function for preg_replace_callback
+ * Uses capture group 1 in the supplied array
+ * Does basic checks to keep characters inside a viewable range.
+ *
+ * @param array $matches An array of matches (relevant info should be the 2nd item in the array)
+ * @return string The fixed string or return the old when limitation of mysql is hit
+ */
+function fixchardb__callback($matches)
+{
+	global $smcFunc;
+	if (!isset($matches[1]))
+		return '';
+
+	$num = $matches[1][0] === 'x' ? hexdec(substr($matches[1], 1)) : (int) $matches[1];
+
+	// it's to big for mb3?
+	if ($num > 0xFFFF && !$smcFunc['db_mb4'])
+		return $matches[0];
+	else
+		return fixchar__callback($matches);
 }
 
 ?>

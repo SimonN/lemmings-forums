@@ -1,95 +1,49 @@
 <?php
 
 /**
+ * This file contains all the administration functions for subscriptions.
+ * (and some more than that :P)
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2023 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.18
+ * @version 2.1.4
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file contains all the screens that control settings for topics and
-	posts.
-
-	void ManagePaidSubscriptions()
-		- the main entrance point for the 'Paid Subscription' screen.
-		- accessed from ?action=admin;area=paidsubscribe.
-		- calls the right function based on the given sub-action.
-		- defaults to sub-action 'view'.
-		- requires admin_forum permission for admin based actions.
-
-	void ModifySubscriptionSettings()
-		- set any setting related to paid subscriptions.
-		- requires the moderate_forum permission
-		- accessed from ?action=admin;area=paidsubscribe;sa=settings.
-
-	void ViewSubscriptions()
-		- view a list of all the current subscriptions
-		- requires the admin_forum permission
-		- accessed from ?action=admin;area=paidsubscribe;sa=view.
-
-	void ModifySubscription()
-		- edit a subscription.
-		- accessed from ?action=admin;area=paidsubscribe;sa=modify.
-
-	void ViewSubscribedUsers()
-		- view a list of all the users who currently have a subscription.
-		- requires the admin_forum permission.
-		- subscription ID is required, in the form of $_GET['sid'].
-		- accessed from ?action=admin;area=paidsubscribe;sa=viewsub.
-
-	int list_getSubscribedUserCount()
-		// !!
-
-	array list_getSubscribedUsers()
-		// !!
-
-	void ModifyUserSubscription()
-		- edit a users subscription.
-		- accessed from ?action=admin;area=paidsubscribe;sa=modifyuser.
-
-	void reapplySubscriptions(array users)
-		- reapplies all subscription rules for each of the users.
-
-	void addSubscription(int id_subscribe, int id_member)
-		- add/extend a subscription for a member.
-
-	void removeSubscription(int id_subscribe, int id_member)
-		- remove a subscription from a user.
-
-	array loadPaymentGateways()
-		- checks the Sources directory for any files fitting the format of a payment gateway.
-		- loads each file to check it's valid.
-		- includes each file and returns the function name and whether it should work with this version of SMF.
-*/
-
+/**
+ * The main entrance point for the 'Paid Subscription' screen, calling
+ * the right function based on the given sub-action.
+ * It defaults to sub-action 'view'.
+ * Accessed from ?action=admin;area=paidsubscribe.
+ * It requires admin_forum permission for admin based actions.
+ */
 function ManagePaidSubscriptions()
 {
-	global $context, $txt, $scripturl, $sourcedir, $smcFunc, $modSettings;
+	global $context, $txt, $modSettings;
 
 	// Load the required language and template.
 	loadLanguage('ManagePaid');
 	loadTemplate('ManagePaid');
 
-	$subActions = array(
-		'modify' => array('ModifySubscription', 'admin_forum'),
-		'modifyuser' => array('ModifyUserSubscription', 'admin_forum'),
-		'settings' => array('ModifySubscriptionSettings', 'admin_forum'),
-		'view' => array('ViewSubscriptions', 'admin_forum'),
-		'viewsub' => array('ViewSubscribedUsers', 'admin_forum'),
-	);
-
-	// Default the sub-action to 'view subscriptions', but only if they have already set things up..
-	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (!empty($modSettings['paid_currency_symbol']) ? 'view' : 'settings');
-
-	// Make sure you can do this.
-	isAllowedTo($subActions[$_REQUEST['sa']][1]);
+	if (!empty($modSettings['paid_enabled']))
+		$subActions = array(
+			'modify' => array('ModifySubscription', 'admin_forum'),
+			'modifyuser' => array('ModifyUserSubscription', 'admin_forum'),
+			'settings' => array('ModifySubscriptionSettings', 'admin_forum'),
+			'view' => array('ViewSubscriptions', 'admin_forum'),
+			'viewsub' => array('ViewSubscribedUsers', 'admin_forum'),
+		);
+	else
+		$subActions = array(
+			'settings' => array('ModifySubscriptionSettings', 'admin_forum'),
+		);
 
 	$context['page_title'] = $txt['paid_subscriptions'];
 
@@ -98,52 +52,166 @@ function ManagePaidSubscriptions()
 		'title' => $txt['paid_subscriptions'],
 		'help' => '',
 		'description' => $txt['paid_subscriptions_desc'],
-		'tabs' => array(
+	);
+	if (!empty($modSettings['paid_enabled']))
+		$context[$context['admin_menu_name']]['tab_data']['tabs'] = array(
 			'view' => array(
 				'description' => $txt['paid_subs_view_desc'],
 			),
 			'settings' => array(
 				'description' => $txt['paid_subs_settings_desc'],
 			),
-		),
-	);
+		);
 
-	// Call the right function for this sub-acton.
-	$subActions[$_REQUEST['sa']][0]();
+	call_integration_hook('integrate_manage_subscriptions', array(&$subActions));
+
+	// Default the sub-action to 'view subscriptions', but only if they have already set things up..
+	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (!empty($modSettings['paid_currency_symbol']) && !empty($modSettings['paid_enabled']) ? 'view' : 'settings');
+
+	// Make sure you can do this.
+	isAllowedTo($subActions[$_REQUEST['sa']][1]);
+
+	// Call the right function for this sub-action.
+	call_helper($subActions[$_REQUEST['sa']][0]);
 }
 
-// Modify which payment methods are to be used.
+/**
+ * Set any setting related to paid subscriptions, i.e.
+ * modify which payment methods are to be used.
+ * It requires the moderate_forum permission
+ * Accessed from ?action=admin;area=paidsubscribe;sa=settings.
+ *
+ * @param bool $return_config Whether or not to return the $config_vars array (used for admin search)
+ * @return void|array Returns nothing or returns the config_vars array if $return_config is true
+ */
 function ModifySubscriptionSettings($return_config = false)
 {
-	global $context, $txt, $modSettings, $sourcedir, $smcFunc, $scripturl;
+	global $context, $txt, $modSettings, $sourcedir, $smcFunc, $scripturl, $boardurl;
 
-	// If the currency is set to something different then we need to set it to other for this to work and set it back shortly.
-	$modSettings['paid_currency'] = !empty($modSettings['paid_currency_code']) ? $modSettings['paid_currency_code'] : '';
-	if (!empty($modSettings['paid_currency_code']) && !in_array($modSettings['paid_currency_code'], array('usd', 'eur', 'gbp')))
-		$modSettings['paid_currency'] = 'other';
-
-	// These are all the default settings.
-	$config_vars = array(
-			array('select', 'paid_email', array(0 => $txt['paid_email_no'], 1 => $txt['paid_email_error'], 2 => $txt['paid_email_all']), 'subtext' => $txt['paid_email_desc']),
-			array('text', 'paid_email_to', 'subtext' => $txt['paid_email_to_desc'], 'size' => 60),
-		'',
-			'dummy_currency' => array('select', 'paid_currency', array('usd' => $txt['usd'], 'eur' => $txt['eur'], 'gbp' => $txt['gbp'], 'other' => $txt['other']), 'javascript' => 'onchange="toggleOther();"'),
-			array('text', 'paid_currency_code', 'subtext' => $txt['paid_currency_code_desc'], 'size' => 5, 'force_div_id' => 'custom_currency_code_div'),
-			array('text', 'paid_currency_symbol', 'subtext' => $txt['paid_currency_symbol_desc'], 'size' => 8, 'force_div_id' => 'custom_currency_symbol_div'),
-			array('check', 'paidsubs_test', 'subtext' => $txt['paidsubs_test_desc'], 'onclick' => 'return document.getElementById(\'paidsubs_test\').checked ? confirm(\'' . $txt['paidsubs_test_confirm'] . '\') : true;'),
-	);
-
-	// Now load all the other gateway settings.
-	$gateways = loadPaymentGateways();
-	foreach ($gateways as $gateway)
+	if (!empty($modSettings['paid_enabled']))
 	{
-		$gatewayClass = new $gateway['display_class']();
-		$setting_data = $gatewayClass->getGatewaySettings();
-		if (!empty($setting_data))
+		// If the currency is set to something different then we need to set it to other for this to work and set it back shortly.
+		$modSettings['paid_currency'] = !empty($modSettings['paid_currency_code']) ? $modSettings['paid_currency_code'] : '';
+		if (!empty($modSettings['paid_currency_code']) && !in_array($modSettings['paid_currency_code'], array('usd', 'eur', 'gbp', 'cad', 'aud')))
+			$modSettings['paid_currency'] = 'other';
+
+		// These are all the default settings.
+		$config_vars = array(
+			array(
+				'check',
+				'paid_enabled'
+			),
+			'',
+
+			array(
+				'select',
+				'paid_email',
+				array(
+					0 => $txt['paid_email_no'],
+					1 => $txt['paid_email_error'],
+					2 => $txt['paid_email_all']
+				),
+				'subtext' => $txt['paid_email_desc']
+			),
+			array(
+				'email',
+				'paid_email_to',
+				'subtext' => $txt['paid_email_to_desc'],
+				'size' => 60
+			),
+			'',
+
+			'dummy_currency' => array(
+				'select',
+				'paid_currency',
+				array(
+					'usd' => $txt['usd'],
+					'eur' => $txt['eur'],
+					'gbp' => $txt['gbp'],
+					'cad' => $txt['cad'],
+					'aud' => $txt['aud'],
+					'other' => $txt['other']
+				),
+				'javascript' => 'onchange="toggleOther();"'
+			),
+			array(
+				'text',
+				'paid_currency_code',
+				'subtext' => $txt['paid_currency_code_desc'],
+				'size' => 5,
+				'force_div_id' => 'custom_currency_code_div'
+			),
+			array(
+				'text',
+				'paid_currency_symbol',
+				'subtext' => $txt['paid_currency_symbol_desc'],
+				'size' => 8,
+				'force_div_id' => 'custom_currency_symbol_div'
+			),
+			array(
+				'check',
+				'paidsubs_test',
+				'subtext' => $txt['paidsubs_test_desc'],
+				'onclick' => 'return document.getElementById(\'paidsubs_test\').checked ? confirm(\'' . $txt['paidsubs_test_confirm'] . '\') : true;'
+			),
+		);
+
+		// Now load all the other gateway settings.
+		$gateways = loadPaymentGateways();
+		foreach ($gateways as $gateway)
 		{
-			$config_vars[] = array('title', $gatewayClass->title, 'text_label' => (isset($txt['paidsubs_gateway_title_' . $gatewayClass->title]) ? $txt['paidsubs_gateway_title_' . $gatewayClass->title] : $gatewayClass->title));
-			$config_vars = array_merge($config_vars, $setting_data);
+			$gatewayClass = new $gateway['display_class']();
+			$setting_data = $gatewayClass->getGatewaySettings();
+			if (!empty($setting_data))
+			{
+				$config_vars[] = array('title', $gatewayClass->title, 'text_label' => (isset($txt['paidsubs_gateway_title_' . $gatewayClass->title]) ? $txt['paidsubs_gateway_title_' . $gatewayClass->title] : $gatewayClass->title));
+				$config_vars = array_merge($config_vars, $setting_data);
+			}
 		}
+
+		$context['settings_message'] = sprintf($txt['paid_note'], $boardurl);
+		$context[$context['admin_menu_name']]['current_subsection'] = 'settings';
+		$context['settings_title'] = $txt['settings'];
+
+		// We want javascript for our currency options.
+		addInlineJavaScript('
+		function toggleOther()
+		{
+			var otherOn = document.getElementById("paid_currency").value == \'other\';
+			var currencydd = document.getElementById("custom_currency_code_div_dd");
+
+			if (otherOn)
+			{
+				document.getElementById("custom_currency_code_div").style.display = "";
+				document.getElementById("custom_currency_symbol_div").style.display = "";
+
+				if (currencydd)
+				{
+					document.getElementById("custom_currency_code_div_dd").style.display = "";
+					document.getElementById("custom_currency_symbol_div_dd").style.display = "";
+				}
+			}
+			else
+			{
+				document.getElementById("custom_currency_code_div").style.display = "none";
+				document.getElementById("custom_currency_symbol_div").style.display = "none";
+
+				if (currencydd)
+				{
+					document.getElementById("custom_currency_symbol_div_dd").style.display = "none";
+					document.getElementById("custom_currency_code_div_dd").style.display = "none";
+				}
+			}
+		}');
+		addInlineJavaScript('
+		toggleOther();', true);
+	}
+	else
+	{
+		$config_vars = array(
+			array('check', 'paid_enabled'),
+		);
+		$context['settings_title'] = $txt['paid_subscriptions'];
 	}
 
 	// Just searching?
@@ -156,61 +224,62 @@ function ModifySubscriptionSettings($return_config = false)
 	// Some important context stuff
 	$context['page_title'] = $txt['settings'];
 	$context['sub_template'] = 'show_settings';
-	$context['settings_message'] = '<span class="smalltext">' . $txt['paid_note'] . '</span>';
-	$context[$context['admin_menu_name']]['current_subsection'] = 'settings';
 
 	// Get the final touches in place.
 	$context['post_url'] = $scripturl . '?action=admin;area=paidsubscribe;save;sa=settings';
-	$context['settings_title'] = $txt['settings'];
-
-	// We want javascript for our currency options.
-	$context['settings_insert_below'] = '
-		<script type="text/javascript"><!-- // --><![CDATA[
-			function toggleOther()
-			{
-				var otherOn = document.getElementById("paid_currency").value == \'other\';
-				var currencydd = document.getElementById("custom_currency_code_div_dd");
-
-				if (otherOn)
-				{
-					document.getElementById("custom_currency_code_div").style.display = "";
-					document.getElementById("custom_currency_symbol_div").style.display = "";
-
-					if (currencydd)
-					{
-						document.getElementById("custom_currency_code_div_dd").style.display = "";
-						document.getElementById("custom_currency_symbol_div_dd").style.display = "";
-					}
-				}
-				else
-				{
-					document.getElementById("custom_currency_code_div").style.display = "none";
-					document.getElementById("custom_currency_symbol_div").style.display = "none";
-
-					if (currencydd)
-					{
-						document.getElementById("custom_currency_symbol_div_dd").style.display = "none";
-						document.getElementById("custom_currency_code_div_dd").style.display = "none";
-					}
-				}
-			}
-			toggleOther();
-		// ]]></script>';
 
 	// Saving the settings?
 	if (isset($_GET['save']))
 	{
 		checkSession();
 
-		// Sort out the currency stuff.
-		if ($_POST['paid_currency'] != 'other')
+		$old = !empty($modSettings['paid_enabled']);
+		$new = !empty($_POST['paid_enabled']);
+		if ($old != $new)
 		{
-			$_POST['paid_currency_code'] = $_POST['paid_currency'];
-			$_POST['paid_currency_symbol'] = $txt[$_POST['paid_currency'] . '_symbol'];
+			// So we're changing this fundamental status. Great.
+			$smcFunc['db_query']('', '
+				UPDATE {db_prefix}scheduled_tasks
+				SET disabled = {int:disabled}
+				WHERE task = {string:task}',
+				array(
+					'disabled' => $new ? 0 : 1,
+					'task' => 'paid_subscriptions',
+				)
+			);
+
+			// This may well affect the next trigger, whether we're enabling or not.
+			require_once($sourcedir . '/ScheduledTasks.php');
+			CalculateNextTrigger('paid_subscriptions');
 		}
-		unset($config_vars['dummy_currency']);
+
+		// Check the email addresses were actually email addresses.
+		if (!empty($_POST['paid_email_to']))
+		{
+			$email_addresses = array();
+			foreach (explode(',', $_POST['paid_email_to']) as $email)
+			{
+				$email = trim($email);
+				if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL))
+					$email_addresses[] = $email;
+				$_POST['paid_email_to'] = implode(',', $email_addresses);
+			}
+		}
+
+		// Can only handle this stuff if it's already enabled...
+		if (!empty($modSettings['paid_enabled']))
+		{
+			// Sort out the currency stuff.
+			if ($_POST['paid_currency'] != 'other')
+			{
+				$_POST['paid_currency_code'] = $_POST['paid_currency'];
+				$_POST['paid_currency_symbol'] = $txt[$_POST['paid_currency'] . '_symbol'];
+			}
+			unset($config_vars['dummy_currency']);
+		}
 
 		saveDBSettings($config_vars);
+		$_SESSION['adm-save'] = true;
 
 		redirectexit('action=admin;area=paidsubscribe;sa=settings');
 	}
@@ -219,10 +288,14 @@ function ModifySubscriptionSettings($return_config = false)
 	prepareDBSettingContext($config_vars);
 }
 
-// Are we looking at viewing the subscriptions?
+/**
+ * View a list of all the current subscriptions
+ * Requires the admin_forum permission.
+ * Accessed from ?action=admin;area=paidsubscribe;sa=view.
+ */
 function ViewSubscriptions()
 {
-	global $context, $txt, $modSettings, $smcFunc, $sourcedir, $scripturl;
+	global $context, $txt, $modSettings, $sourcedir, $scripturl;
 
 	// Not made the settings yet?
 	if (empty($modSettings['paid_currency_symbol']))
@@ -234,12 +307,26 @@ function ViewSubscriptions()
 
 	$listOptions = array(
 		'id' => 'subscription_list',
-		'items_per_page' => 20,
+		'title' => $txt['subscriptions'],
+		'items_per_page' => $modSettings['defaultMaxListItems'],
 		'base_href' => $scripturl . '?action=admin;area=paidsubscribe;sa=view',
 		'get_items' => array(
-			'function' => function() use ($context)
+			'function' => function($start, $items_per_page) use ($context)
 			{
-				return $context['subscriptions'];
+				$subscriptions = array();
+				$counter = 0;
+				$start++;
+
+				foreach ($context['subscriptions'] as $data)
+				{
+					if (++$counter < $start)
+						continue;
+					elseif ($counter == $start + $items_per_page)
+						break;
+
+					$subscriptions[] = $data;
+				}
+				return $subscriptions;
 			},
 		),
 		'get_count' => array(
@@ -253,7 +340,7 @@ function ViewSubscriptions()
 			'name' => array(
 				'header' => array(
 					'value' => $txt['paid_name'],
-					'style' => 'text-align: left; width: 35%;',
+					'style' => 'width: 35%;',
 				),
 				'data' => array(
 					'function' => function($rowData) use ($scripturl)
@@ -265,7 +352,6 @@ function ViewSubscriptions()
 			'cost' => array(
 				'header' => array(
 					'value' => $txt['paid_cost'],
-					'style' => 'text-align: left;',
 				),
 				'data' => array(
 					'function' => function($rowData) use ($txt)
@@ -278,40 +364,44 @@ function ViewSubscriptions()
 				'header' => array(
 					'value' => $txt['paid_pending'],
 					'style' => 'width: 18%;',
+					'class' => 'centercol',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'pending',
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'finished' => array(
 				'header' => array(
 					'value' => $txt['paid_finished'],
+					'class' => 'centercol',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'finished',
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'total' => array(
 				'header' => array(
 					'value' => $txt['paid_active'],
+					'class' => 'centercol',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'total',
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'is_active' => array(
 				'header' => array(
 					'value' => $txt['paid_is_active'],
+					'class' => 'centercol',
 				),
 				'data' => array(
 					'function' => function($rowData) use ($txt)
 					{
 						return '<span style="color: ' . ($rowData['active'] ? 'green' : 'red') . '">' . ($rowData['active'] ? $txt['yes'] : $txt['no']) . '</span>';
 					},
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'modify' => array(
@@ -320,7 +410,7 @@ function ViewSubscriptions()
 					{
 						return '<a href="' . $scripturl . '?action=admin;area=paidsubscribe;sa=modify;sid=' . $rowData['id'] . '">' . $txt['modify'] . '</a>';
 					},
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'delete' => array(
@@ -329,7 +419,7 @@ function ViewSubscriptions()
 					{
 						return '<a href="' . $scripturl . '?action=admin;area=paidsubscribe;sa=modify;delete;sid=' . $rowData['id'] . '">' . $txt['delete'] . '</a>';
 					},
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 		),
@@ -338,11 +428,12 @@ function ViewSubscriptions()
 		),
 		'additional_rows' => array(
 			array(
+				'position' => 'above_table_headers',
+				'value' => '<input type="submit" name="add" value="' . $txt['paid_add_subscription'] . '" class="button">',
+			),
+			array(
 				'position' => 'below_table_data',
-				'value' => '
-					<input type="submit" name="add" value="' . $txt['paid_add_subscription'] . '" class="button_submit" />
-				',
-				'style' => 'text-align: right;',
+				'value' => '<input type="submit" name="add" value="' . $txt['paid_add_subscription'] . '" class="button">',
 			),
 		),
 	);
@@ -354,10 +445,13 @@ function ViewSubscriptions()
 	$context['default_list'] = 'subscription_list';
 }
 
-// Adding, editing and deleting subscriptions.
+/**
+ * Adding, editing and deleting subscriptions.
+ * Accessed from ?action=admin;area=paidsubscribe;sa=modify.
+ */
 function ModifySubscription()
 {
-	global $context, $txt, $modSettings, $smcFunc;
+	global $context, $txt, $smcFunc;
 
 	$context['sub_id'] = isset($_REQUEST['sid']) ? (int) $_REQUEST['sid'] : 0;
 	$context['action_type'] = $context['sub_id'] ? (isset($_REQUEST['delete']) ? 'delete' : 'edit') : 'add';
@@ -370,14 +464,98 @@ function ModifySubscription()
 	if (isset($_POST['delete_confirm']) && isset($_REQUEST['delete']))
 	{
 		checkSession();
+		validateToken('admin-pmsd');
 
-		$smcFunc['db_query']('delete_subscription', '
+		// Before we delete the subscription we need to find out if anyone currently has said subscription.
+		$request = $smcFunc['db_query']('', '
+			SELECT ls.id_member, ls.old_id_group, mem.id_group, mem.additional_groups
+			FROM {db_prefix}log_subscribed AS ls
+				INNER JOIN {db_prefix}members AS mem ON (ls.id_member = mem.id_member)
+			WHERE id_subscribe = {int:current_subscription}
+				AND status = {int:is_active}',
+			array(
+				'current_subscription' => $context['sub_id'],
+				'is_active' => 1,
+			)
+		);
+		$members = array();
+		while ($row = $smcFunc['db_fetch_assoc']($request))
+		{
+			$id_member = array_shift($row);
+			$members[$id_member] = $row;
+		}
+		$smcFunc['db_free_result']($request);
+
+		// If there are any members with this subscription, we have to do some more work before we go any further.
+		if (!empty($members))
+		{
+			$request = $smcFunc['db_query']('', '
+				SELECT id_group, add_groups
+				FROM {db_prefix}subscriptions
+				WHERE id_subscribe = {int:current_subscription}',
+				array(
+					'current_subscription' => $context['sub_id'],
+				)
+			);
+			$id_group = 0;
+			$add_groups = '';
+			if ($smcFunc['db_num_rows']($request))
+				list ($id_group, $add_groups) = $smcFunc['db_fetch_row']($request);
+			$smcFunc['db_free_result']($request);
+
+			$changes = array();
+
+			// Is their group changing? This subscription may not have changed primary group.
+			if (!empty($id_group))
+			{
+				foreach ($members as $id_member => $member_data)
+				{
+					// If their current primary group isn't what they had before the subscription, and their current group was
+					// granted by the sub, remove it.
+					if ($member_data['old_id_group'] != $member_data['id_group'] && $member_data['id_group'] == $id_group)
+						$changes[$id_member]['id_group'] = $member_data['old_id_group'];
+				}
+			}
+
+			// Did this subscription add secondary groups?
+			if (!empty($add_groups))
+			{
+				$add_groups = explode(',', $add_groups);
+				foreach ($members as $id_member => $member_data)
+				{
+					// First let's get their groups sorted.
+					$current_groups = explode(',', $member_data['additional_groups']);
+					$new_groups = implode(',', array_diff($current_groups, $add_groups));
+					if ($new_groups != $member_data['additional_groups'])
+						$changes[$id_member]['additional_groups'] = $new_groups;
+				}
+			}
+
+			// We're going through changes...
+			if (!empty($changes))
+				foreach ($changes as $id_member => $new_values)
+					updateMemberData($id_member, $new_values);
+		}
+
+		// Delete the subscription
+		$smcFunc['db_query']('', '
 			DELETE FROM {db_prefix}subscriptions
 			WHERE id_subscribe = {int:current_subscription}',
 			array(
 				'current_subscription' => $context['sub_id'],
 			)
 		);
+
+		// And delete any subscriptions to it to clear the phantom data too.
+		$smcFunc['db_query']('', '
+			DELETE FROM {db_prefix}log_subscribed
+			WHERE id_subscribe = {int:current_subscription}',
+			array(
+				'current_subscription' => $context['sub_id'],
+			)
+		);
+
+		call_integration_hook('integrate_delete_subscription', array($context['sub_id']));
 
 		redirectexit('action=admin;area=paidsubscribe;view');
 	}
@@ -393,10 +571,31 @@ function ModifySubscription()
 		$allowpartial = isset($_POST['allow_partial']) ? 1 : 0;
 		$reminder = isset($_POST['reminder']) ? (int) $_POST['reminder'] : 0;
 		$emailComplete = strlen($_POST['emailcomplete']) > 10 ? trim($_POST['emailcomplete']) : '';
+		$_POST['prim_group'] = !empty($_POST['prim_group']) ? (int) $_POST['prim_group'] : 0;
+
+		// Cleanup text fields
+		$_POST['name'] = $smcFunc['htmlspecialchars']($_POST['name']);
+		$_POST['desc'] = $smcFunc['htmlspecialchars']($_POST['desc']);
+		$emailComplete = $smcFunc['htmlspecialchars']($emailComplete);
 
 		// Is this a fixed one?
 		if ($_POST['duration_type'] == 'fixed')
 		{
+			$_POST['span_value'] = !empty($_POST['span_value']) && is_numeric($_POST['span_value']) ? ceil($_POST['span_value']) : 0;
+
+			// There are sanity check limits on these things.
+			$limits = array(
+				'D' => 90,
+				'W' => 52,
+				'M' => 24,
+				'Y' => 5,
+			);
+			if (empty($_POST['span_unit']) || empty($limits[$_POST['span_unit']]) || $_POST['span_value'] < 1)
+				fatal_lang_error('paid_invalid_duration', false);
+
+			if ($_POST['span_value'] > $limits[$_POST['span_unit']])
+				fatal_lang_error('paid_invalid_duration_' . $_POST['span_unit'], false);
+
 			// Clean the span.
 			$span = $_POST['span_value'] . $_POST['span_unit'];
 
@@ -404,7 +603,7 @@ function ModifySubscription()
 			$cost = array('fixed' => sprintf('%01.2f', strtr($_POST['cost'], ',', '.')));
 
 			// There needs to be something.
-			if (empty($_POST['span_value']) || empty($_POST['cost']))
+			if ($cost['fixed'] == '0.00')
 				fatal_lang_error('paid_no_cost_value');
 		}
 		// Flexible is harder but more fun ;)
@@ -419,10 +618,13 @@ function ModifySubscription()
 				'year' => sprintf('%01.2f', strtr($_POST['cost_year'], ',', '.')),
 			);
 
-			if (empty($_POST['cost_day']) && empty($_POST['cost_week']) && empty($_POST['cost_month']) && empty($_POST['cost_year']))
+			if ($cost['day'] == '0.00' && $cost['week'] == '0.00' && $cost['month'] == '0.00' && $cost['year'] == '0.00')
 				fatal_lang_error('paid_all_freq_blank');
 		}
-		$cost = serialize($cost);
+		$cost = $smcFunc['json_encode']($cost);
+
+		// Having now validated everything that might throw an error, let's also now deal with the token.
+		validateToken('admin-pms');
 
 		// Yep, time to do additional groups.
 		$addgroups = array();
@@ -434,7 +636,7 @@ function ModifySubscription()
 		// Is it new?!
 		if ($context['action_type'] == 'add')
 		{
-			$smcFunc['db_insert']('',
+			$id_subscribe = $smcFunc['db_insert']('',
 				'{db_prefix}subscriptions',
 				array(
 					'name' => 'string-60', 'description' => 'string-255', 'active' => 'int', 'length' => 'string-4', 'cost' => 'string',
@@ -446,7 +648,8 @@ function ModifySubscription()
 					$_POST['prim_group'], $addgroups, $isRepeatable, $allowpartial, $emailComplete,
 					$reminder,
 				),
-				array('id_subscribe')
+				array('id_subscribe'),
+				1
 			);
 		}
 		// Otherwise must be editing.
@@ -475,7 +678,7 @@ function ModifySubscription()
 				WHERE id_subscribe = {int:current_subscription}',
 				array(
 					'is_active' => $isActive,
-					'id_group' => !empty($_POST['prim_group']) ? $_POST['prim_group'] : 0,
+					'id_group' => $_POST['prim_group'],
 					'repeatable' => $isRepeatable,
 					'allow_partial' => $allowpartial,
 					'reminder' => $reminder,
@@ -489,6 +692,7 @@ function ModifySubscription()
 				)
 			);
 		}
+		call_integration_hook('integrate_save_subscription', array(($context['action_type'] == 'add' ? $id_subscribe : $context['sub_id']), $_POST['name'], $_POST['desc'], $isActive, $span, $cost, $_POST['prim_group'], $addgroups, $isRepeatable, $allowpartial, $emailComplete, $reminder));
 
 		redirectexit('action=admin;area=paidsubscribe;view');
 	}
@@ -534,12 +738,12 @@ function ModifySubscription()
 			preg_match('~(\d*)(\w)~', $row['length'], $match);
 			if (isset($match[2]))
 			{
-				$span_value = $match[1];
+				$_POST['span_value'] = $match[1];
 				$span_unit = $match[2];
 			}
 			else
 			{
-				$span_value = 0;
+				$_POST['span_value'] = 0;
 				$span_unit = 'D';
 			}
 
@@ -552,9 +756,9 @@ function ModifySubscription()
 			$context['sub'] = array(
 				'name' => $row['name'],
 				'desc' => $row['description'],
-				'cost' => safe_unserialize($row['cost']),
+				'cost' => $smcFunc['json_decode']($row['cost'], true),
 				'span' => array(
-					'value' => $span_value,
+					'value' => $_POST['span_value'],
 					'unit' => $span_unit,
 				),
 				'prim_group' => $row['id_group'],
@@ -563,7 +767,7 @@ function ModifySubscription()
 				'repeatable' => $row['repeatable'],
 				'allow_partial' => $row['allow_partial'],
 				'duration' => $isFlexible ? 'flexible' : 'fixed',
-				'email_complete' => htmlspecialchars($row['email_complete']),
+				'email_complete' => $row['email_complete'],
 				'reminder' => $row['reminder'],
 			);
 		}
@@ -599,12 +803,21 @@ function ModifySubscription()
 	while ($row = $smcFunc['db_fetch_assoc']($request))
 		$context['groups'][$row['id_group']] = $row['group_name'];
 	$smcFunc['db_free_result']($request);
+
+	// This always happens.
+	createToken($context['action_type'] == 'delete' ? 'admin-pmsd' : 'admin-pms');
 }
 
-// View all the users subscribed to a particular subscription!
+/**
+ * View all the users subscribed to a particular subscription.
+ * Requires the admin_forum permission.
+ * Accessed from ?action=admin;area=paidsubscribe;sa=viewsub.
+ *
+ * Subscription ID is required, in the form of $_GET['sid'].
+ */
 function ViewSubscribedUsers()
 {
-	global $context, $txt, $modSettings, $scripturl, $options, $smcFunc, $sourcedir;
+	global $context, $txt, $scripturl, $smcFunc, $sourcedir, $modSettings;
 
 	// Setup the template.
 	$context['page_title'] = $txt['viewing_users_subscribed'];
@@ -635,12 +848,13 @@ function ViewSubscribedUsers()
 	$smcFunc['db_free_result']($request);
 
 	// Are we searching for people?
-	$search_string = isset($_POST['ssearch']) && !empty($_POST['sub_search']) ? ' AND IFNULL(mem.real_name, {string:guest}) LIKE {string:search}' : '';
+	$search_string = isset($_POST['ssearch']) && !empty($_POST['sub_search']) ? ' AND COALESCE(mem.real_name, {string:guest}) LIKE {string:search}' : '';
 	$search_vars = empty($_POST['sub_search']) ? array() : array('search' => '%' . $_POST['sub_search'] . '%', 'guest' => $txt['guest']);
 
 	$listOptions = array(
 		'id' => 'subscribed_users_list',
-		'items_per_page' => 20,
+		'title' => sprintf($txt['view_users_subscribed'], $row['name']),
+		'items_per_page' => $modSettings['defaultMaxListItems'],
 		'base_href' => $scripturl . '?action=admin;area=paidsubscribe;sa=viewsub;sid=' . $context['sub_id'],
 		'default_sort_col' => 'name',
 		'get_items' => array(
@@ -664,10 +878,10 @@ function ViewSubscribedUsers()
 			'name' => array(
 				'header' => array(
 					'value' => $txt['who_member'],
-					'style' => 'text-align: left; width: 20%;',
+					'style' => 'width: 20%;',
 				),
 				'data' => array(
-					'function' => function($rowData) use ($context, $txt, $scripturl)
+					'function' => function($rowData) use ($scripturl, $txt)
 					{
 						return $rowData['id_member'] == 0 ? $txt['guest'] : '<a href="' . $scripturl . '?action=profile;u=' . $rowData['id_member'] . '">' . $rowData['name'] . '</a>';
 					},
@@ -680,7 +894,7 @@ function ViewSubscribedUsers()
 			'status' => array(
 				'header' => array(
 					'value' => $txt['paid_status'],
-					'style' => 'text-align: left; width: 10%;',
+					'style' => 'width: 10%;',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'status_text',
@@ -693,7 +907,7 @@ function ViewSubscribedUsers()
 			'payments_pending' => array(
 				'header' => array(
 					'value' => $txt['paid_payments_pending'],
-					'style' => 'text-align: left; width: 10%;',
+					'style' => 'width: 15%;',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'pending',
@@ -706,7 +920,7 @@ function ViewSubscribedUsers()
 			'start_time' => array(
 				'header' => array(
 					'value' => $txt['start_date'],
-					'style' => 'text-align: left; width: 20%;',
+					'style' => 'width: 20%;',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'start_date',
@@ -720,7 +934,7 @@ function ViewSubscribedUsers()
 			'end_time' => array(
 				'header' => array(
 					'value' => $txt['end_date'],
-					'style' => 'text-align: left; width: 20%;',
+					'style' => 'width: 20%;',
 				),
 				'data' => array(
 					'db_htmlsafe' => 'end_date',
@@ -734,25 +948,27 @@ function ViewSubscribedUsers()
 			'modify' => array(
 				'header' => array(
 					'style' => 'width: 10%;',
+					'class' => 'centercol',
 				),
 				'data' => array(
-					'function' => function($rowData) use ($txt, $scripturl)
+					'function' => function($rowData) use ($scripturl, $txt)
 					{
 						return '<a href="' . $scripturl . '?action=admin;area=paidsubscribe;sa=modifyuser;lid=' . $rowData['id'] . '">' . $txt['modify'] . '</a>';
 					},
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 			'delete' => array(
 				'header' => array(
 					'style' => 'width: 4%;',
+					'class' => 'centercol',
 				),
 				'data' => array(
 					'function' => function($rowData)
 					{
-						return '<input type="checkbox" name="delsub[' . $rowData['id'] . ']" class="input_check" />';
+						return '<input type="checkbox" name="delsub[' . $rowData['id'] . ']">';
 					},
-					'style' => 'text-align: center;',
+					'class' => 'centercol',
 				),
 			),
 		),
@@ -763,24 +979,17 @@ function ViewSubscribedUsers()
 			array(
 				'position' => 'below_table_data',
 				'value' => '
-					<div class="floatleft">
-						<input type="submit" name="add" value="' . $txt['add_subscriber'] . '" class="button_submit" />
-					</div>
-					<div class="floatright">
-						<input type="submit" name="finished" value="' . $txt['complete_selected'] . '" onclick="return confirm(\'' . $txt['complete_are_sure'] . '\');" class="button_submit" />
-						<input type="submit" name="delete" value="' . $txt['delete_selected'] . '" onclick="return confirm(\'' . $txt['delete_are_sure'] . '\');" class="button_submit" />
-					</div>
+					<input type="submit" name="add" value="' . $txt['add_subscriber'] . '" class="button">
+					<input type="submit" name="finished" value="' . $txt['complete_selected'] . '" data-confirm="' . $txt['complete_are_sure'] . '" class="button you_sure">
+					<input type="submit" name="delete" value="' . $txt['delete_selected'] . '" data-confirm="' . $txt['delete_are_sure'] . '" class="button you_sure">
 				',
 			),
 			array(
 				'position' => 'top_of_list',
 				'value' => '
-					<div class="title_bar">
-						<h3 class="titlebg">' . sprintf($txt['view_users_subscribed'], $row['name']) . '</h3>
-					</div>
-					<div class="floatright">
-						<input type="text" name="sub_search" value="" class="input_text" />
-						<input type="submit" name="ssearch" value="' . $txt['search_sub'] . '" class="button_submit" />
+					<div class="flow_auto">
+						<input type="submit" name="ssearch" value="' . $txt['search_sub'] . '" class="button" style="margin-top: 3px;">
+						<input type="text" name="sub_search" value="" class="floatright">
 					</div>
 				',
 			),
@@ -794,7 +1003,16 @@ function ViewSubscribedUsers()
 	$context['default_list'] = 'subscribed_users_list';
 }
 
-// Returns how many people are subscribed to a paid subscription.
+/**
+ * Returns how many people are subscribed to a paid subscription.
+ *
+ * @todo refactor away
+ *
+ * @param int $id_sub The ID of the subscription
+ * @param string $search_string A search string
+ * @param array $search_vars An array of variables for the search string
+ * @return int The number of subscribed users matching the given parameters
+ */
 function list_getSubscribedUserCount($id_sub, $search_string, $search_vars = array())
 {
 	global $smcFunc;
@@ -818,24 +1036,40 @@ function list_getSubscribedUserCount($id_sub, $search_string, $search_vars = arr
 	return $memberCount;
 }
 
+/**
+ * Return the subscribed users list, for the given parameters.
+ *
+ * @todo refactor outta here
+ *
+ * @param int $start The item to start with (for pagination purposes)
+ * @param int $items_per_page How many items to show on each page
+ * @param string $sort A string indicating how to sort the results
+ * @param int $id_sub The ID of the subscription
+ * @param string $search_string A search string
+ * @param array $search_vars The variables for the search string
+ * @return array An array of information about the subscribed users matching the given parameters
+ */
 function list_getSubscribedUsers($start, $items_per_page, $sort, $id_sub, $search_string, $search_vars = array())
 {
 	global $smcFunc, $txt;
 
 	$request = $smcFunc['db_query']('', '
-		SELECT ls.id_sublog, IFNULL(mem.id_member, 0) AS id_member, IFNULL(mem.real_name, {string:guest}) AS name, ls.start_time, ls.end_time,
+		SELECT ls.id_sublog, COALESCE(mem.id_member, 0) AS id_member, COALESCE(mem.real_name, {string:guest}) AS name, ls.start_time, ls.end_time,
 			ls.status, ls.payments_pending
 		FROM {db_prefix}log_subscribed AS ls
 			LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = ls.id_member)
 		WHERE ls.id_subscribe = {int:current_subscription} ' . $search_string . '
 			AND (ls.end_time != {int:no_end_time} OR ls.payments_pending != {int:no_payments_pending})
-		ORDER BY ' . $sort . '
-		LIMIT ' . $start . ', ' . $items_per_page,
+		ORDER BY {raw:sort}
+		LIMIT {int:start}, {int:max}',
 		array_merge($search_vars, array(
 			'current_subscription' => $id_sub,
 			'no_end_time' => 0,
 			'no_payments_pending' => 0,
 			'guest' => $txt['guest'],
+			'sort' => $sort,
+			'start' => $start,
+			'max' => $items_per_page,
 		))
 	);
 	$subscribers = array();
@@ -855,7 +1089,10 @@ function list_getSubscribedUsers($start, $items_per_page, $sort, $id_sub, $searc
 	return $subscribers;
 }
 
-// Edit or add a user subscription.
+/**
+ * Edit or add a user subscription.
+ * Accessed from ?action=admin;area=paidsubscribe;sa=modifyuser.
+ */
 function ModifyUserSubscription()
 {
 	global $context, $txt, $modSettings, $smcFunc;
@@ -951,14 +1188,15 @@ function ModifyUserSubscription()
 					'{db_prefix}log_subscribed',
 					array(
 						'id_subscribe' => 'int', 'id_member' => 'int', 'old_id_group' => 'int', 'start_time' => 'int',
-						'end_time' => 'int', 'status' => 'int',
+						'end_time' => 'int', 'status' => 'int', 'pending_details' => 'string-65534'
 					),
 					array(
 						$context['sub_id'], $id_member, $id_group, $starttime,
-						$endtime, $status,
+						$endtime, $status, $smcFunc['json_encode'](array())
 					),
 					array('id_sublog')
 				);
+
 			}
 		}
 		// Updating.
@@ -1037,25 +1275,25 @@ function ModifyUserSubscription()
 		$context['sub'] = array(
 			'id' => 0,
 			'start' => array(
-				'year' => (int) strftime('%Y', time()),
-				'month' => (int) strftime('%m', time()),
-				'day' => (int) strftime('%d', time()),
-				'hour' => (int) strftime('%H', time()),
-				'min' => (int) strftime('%M', time()) < 10 ? '0' . (int) strftime('%M', time()) : (int) strftime('%M', time()),
+				'year' => (int) smf_strftime('%Y', time()),
+				'month' => (int) smf_strftime('%m', time()),
+				'day' => (int) smf_strftime('%d', time()),
+				'hour' => (int) smf_strftime('%H', time()),
+				'min' => (int) smf_strftime('%M', time()) < 10 ? '0' . (int) smf_strftime('%M', time()) : (int) smf_strftime('%M', time()),
 				'last_day' => 0,
 			),
 			'end' => array(
-				'year' => (int) strftime('%Y', time()),
-				'month' => (int) strftime('%m', time()),
-				'day' => (int) strftime('%d', time()),
-				'hour' => (int) strftime('%H', time()),
-				'min' => (int) strftime('%M', time()) < 10 ? '0' . (int) strftime('%M', time()) : (int) strftime('%M', time()),
+				'year' => (int) smf_strftime('%Y', time()),
+				'month' => (int) smf_strftime('%m', time()),
+				'day' => (int) smf_strftime('%d', time()),
+				'hour' => (int) smf_strftime('%H', time()),
+				'min' => (int) smf_strftime('%M', time()) < 10 ? '0' . (int) smf_strftime('%M', time()) : (int) smf_strftime('%M', time()),
 				'last_day' => 0,
 			),
 			'status' => 1,
 		);
-		$context['sub']['start']['last_day'] = (int) strftime('%d', mktime(0, 0, 0, $context['sub']['start']['month'] == 12 ? 1 : $context['sub']['start']['month'] + 1, 0, $context['sub']['start']['month'] == 12 ? $context['sub']['start']['year'] + 1 : $context['sub']['start']['year']));
-		$context['sub']['end']['last_day'] = (int) strftime('%d', mktime(0, 0, 0, $context['sub']['end']['month'] == 12 ? 1 : $context['sub']['end']['month'] + 1, 0, $context['sub']['end']['month'] == 12 ? $context['sub']['end']['year'] + 1 : $context['sub']['end']['year']));
+		$context['sub']['start']['last_day'] = (int) smf_strftime('%d', mktime(0, 0, 0, $context['sub']['start']['month'] == 12 ? 1 : $context['sub']['start']['month'] + 1, 0, $context['sub']['start']['month'] == 12 ? $context['sub']['start']['year'] + 1 : $context['sub']['start']['year']));
+		$context['sub']['end']['last_day'] = (int) smf_strftime('%d', mktime(0, 0, 0, $context['sub']['end']['month'] == 12 ? 1 : $context['sub']['end']['month'] + 1, 0, $context['sub']['end']['month'] == 12 ? $context['sub']['end']['year'] + 1 : $context['sub']['end']['year']));
 
 		if (isset($_GET['uid']))
 		{
@@ -1078,7 +1316,7 @@ function ModifyUserSubscription()
 	{
 		$request = $smcFunc['db_query']('', '
 			SELECT ls.id_sublog, ls.id_subscribe, ls.id_member, start_time, end_time, status, payments_pending, pending_details,
-				IFNULL(mem.real_name, {string:blank_string}) AS username
+				COALESCE(mem.real_name, {string:blank_string}) AS username
 			FROM {db_prefix}log_subscribed AS ls
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = ls.id_member)
 			WHERE ls.id_sublog = {int:current_subscription_item}
@@ -1097,14 +1335,14 @@ function ModifyUserSubscription()
 		$context['pending_payments'] = array();
 		if (!empty($row['pending_details']))
 		{
-			$pending_details = safe_unserialize($row['pending_details']);
+			$pending_details = $smcFunc['json_decode']($row['pending_details'], true);
 			foreach ($pending_details as $id => $pending)
 			{
 				// Only this type need be displayed.
 				if ($pending[3] == 'payback')
 				{
 					// Work out what the options were.
-					$costs = safe_unserialize($context['current_subscription']['real_cost']);
+					$costs = $smcFunc['json_decode']($context['current_subscription']['real_cost'], true);
 
 					if ($context['current_subscription']['real_length'] == 'F')
 					{
@@ -1138,7 +1376,7 @@ function ModifyUserSubscription()
 							addSubscription($context['current_subscription']['id'], $row['id_member'], $context['current_subscription']['real_length'] == 'F' ? strtoupper(substr($pending[2], 0, 1)) : 0);
 						unset($pending_details[$id]);
 
-						$new_details = serialize($pending_details);
+						$new_details = $smcFunc['json_encode']($pending_details);
 
 						// Update the entry.
 						$smcFunc['db_query']('', '
@@ -1162,30 +1400,36 @@ function ModifyUserSubscription()
 		$context['sub'] = array(
 			'id' => 0,
 			'start' => array(
-				'year' => (int) strftime('%Y', $row['start_time']),
-				'month' => (int) strftime('%m', $row['start_time']),
-				'day' => (int) strftime('%d', $row['start_time']),
-				'hour' => (int) strftime('%H', $row['start_time']),
-				'min' => (int) strftime('%M', $row['start_time']) < 10 ? '0' . (int) strftime('%M', $row['start_time']) : (int) strftime('%M', $row['start_time']),
+				'year' => (int) smf_strftime('%Y', $row['start_time']),
+				'month' => (int) smf_strftime('%m', $row['start_time']),
+				'day' => (int) smf_strftime('%d', $row['start_time']),
+				'hour' => (int) smf_strftime('%H', $row['start_time']),
+				'min' => (int) smf_strftime('%M', $row['start_time']) < 10 ? '0' . (int) smf_strftime('%M', $row['start_time']) : (int) smf_strftime('%M', $row['start_time']),
 				'last_day' => 0,
 			),
 			'end' => array(
-				'year' => (int) strftime('%Y', $row['end_time']),
-				'month' => (int) strftime('%m', $row['end_time']),
-				'day' => (int) strftime('%d', $row['end_time']),
-				'hour' => (int) strftime('%H', $row['end_time']),
-				'min' => (int) strftime('%M', $row['end_time']) < 10 ? '0' . (int) strftime('%M', $row['end_time']) : (int) strftime('%M', $row['end_time']),
+				'year' => (int) smf_strftime('%Y', $row['end_time']),
+				'month' => (int) smf_strftime('%m', $row['end_time']),
+				'day' => (int) smf_strftime('%d', $row['end_time']),
+				'hour' => (int) smf_strftime('%H', $row['end_time']),
+				'min' => (int) smf_strftime('%M', $row['end_time']) < 10 ? '0' . (int) smf_strftime('%M', $row['end_time']) : (int) smf_strftime('%M', $row['end_time']),
 				'last_day' => 0,
 			),
 			'status' => $row['status'],
 			'username' => $row['username'],
 		);
-		$context['sub']['start']['last_day'] = (int) strftime('%d', mktime(0, 0, 0, $context['sub']['start']['month'] == 12 ? 1 : $context['sub']['start']['month'] + 1, 0, $context['sub']['start']['month'] == 12 ? $context['sub']['start']['year'] + 1 : $context['sub']['start']['year']));
-		$context['sub']['end']['last_day'] = (int) strftime('%d', mktime(0, 0, 0, $context['sub']['end']['month'] == 12 ? 1 : $context['sub']['end']['month'] + 1, 0, $context['sub']['end']['month'] == 12 ? $context['sub']['end']['year'] + 1 : $context['sub']['end']['year']));
+		$context['sub']['start']['last_day'] = (int) smf_strftime('%d', mktime(0, 0, 0, $context['sub']['start']['month'] == 12 ? 1 : $context['sub']['start']['month'] + 1, 0, $context['sub']['start']['month'] == 12 ? $context['sub']['start']['year'] + 1 : $context['sub']['start']['year']));
+		$context['sub']['end']['last_day'] = (int) smf_strftime('%d', mktime(0, 0, 0, $context['sub']['end']['month'] == 12 ? 1 : $context['sub']['end']['month'] + 1, 0, $context['sub']['end']['month'] == 12 ? $context['sub']['end']['year'] + 1 : $context['sub']['end']['year']));
 	}
+
+	loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
 }
 
-// Re-apply subscription rules.
+/**
+ * Reapplies all subscription rules for each of the users.
+ *
+ * @param array $users An array of user IDs
+ */
 function reapplySubscriptions($users)
 {
 	global $smcFunc;
@@ -1264,7 +1508,15 @@ function reapplySubscriptions($users)
 	}
 }
 
-// Add or extend a subscription of a user.
+/**
+ * Add or extend a subscription of a user.
+ *
+ * @param int $id_subscribe The subscription ID
+ * @param int $id_member The ID of the member
+ * @param int|string $renewal 0 if we're forcing start/end time, otherwise a string indicating how long to renew the subscription for ('D', 'W', 'M' or 'Y')
+ * @param int $forceStartTime If set, forces the subscription to start at the specified time
+ * @param int $forceEndTime If set, forces the subscription to end at the specified time
+ */
 function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTime = 0, $forceEndTime = 0)
 {
 	global $context, $smcFunc;
@@ -1316,6 +1568,7 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 			'is_active' => 1,
 		)
 	);
+
 	if ($smcFunc['db_num_rows']($request) != 0)
 	{
 		list ($id_sublog, $endtime, $starttime) = $smcFunc['db_fetch_row']($request);
@@ -1335,12 +1588,13 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 		// As everything else should be good, just update!
 		$smcFunc['db_query']('', '
 			UPDATE {db_prefix}log_subscribed
-			SET end_time = {int:end_time}, start_time = {int:start_time}
+			SET end_time = {int:end_time}, start_time = {int:start_time}, reminder_sent = {int:no_reminder_sent}
 			WHERE id_sublog = {int:current_subscription_item}',
 			array(
 				'end_time' => $endtime,
 				'start_time' => $starttime,
 				'current_subscription_item' => $id_sublog,
+				'no_reminder_sent' => 0,
 			)
 		);
 
@@ -1357,6 +1611,7 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 			'current_member' => $id_member,
 		)
 	);
+
 	// Just in case the member doesn't exist.
 	if ($smcFunc['db_num_rows']($request) == 0)
 		return;
@@ -1412,7 +1667,10 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 			'current_member' => $id_member,
 		)
 	);
-	//!!! Don't really need to do this twice...
+
+	/**
+	 * @todo Don't really need to do this twice...
+	 */
 	if ($smcFunc['db_num_rows']($request) != 0)
 	{
 		list ($id_sublog, $endtime, $starttime) = $smcFunc['db_fetch_row']($request);
@@ -1432,8 +1690,7 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 		// As everything else should be good, just update!
 		$smcFunc['db_query']('', '
 			UPDATE {db_prefix}log_subscribed
-			SET start_time = {int:start_time}, end_time = {int:end_time}, old_id_group = {int:old_id_group}, status = {int:is_active},
-				reminder_sent = {int:no_reminder_sent}
+			SET start_time = {int:start_time}, end_time = {int:end_time}, old_id_group = {int:old_id_group}, status = {int:is_active}, reminder_sent = {int:no_reminder_sent}
 			WHERE id_sublog = {int:current_subscription_item}',
 			array(
 				'start_time' => $starttime,
@@ -1473,7 +1730,13 @@ function addSubscription($id_subscribe, $id_member, $renewal = 0, $forceStartTim
 	);
 }
 
-// Removes a subscription from a user, as in removes the groups.
+/**
+ * Removes a subscription from a user, as in removes the groups.
+ *
+ * @param int $id_subscribe The ID of the subscription
+ * @param int $id_member The ID of the member
+ * @param bool $delete Whether to delete the subscription or just disable it
+ */
 function removeSubscription($id_subscribe, $id_member, $delete = false)
 {
 	global $context, $smcFunc;
@@ -1548,7 +1811,7 @@ function removeSubscription($id_subscribe, $id_member, $delete = false)
 	}
 	$smcFunc['db_free_result']($request);
 
-	// Now, for everything we are removing check they defintely are not allowed it.
+	// Now, for everything we are removing check they definitely are not allowed it.
 	$existingGroups = explode(',', $additional_groups);
 	foreach ($existingGroups as $key => $group)
 		if (empty($group) || (in_array($group, $removals) && !in_array($group, $allowed)))
@@ -1618,7 +1881,9 @@ function removeSubscription($id_subscribe, $id_member, $delete = false)
 		);
 }
 
-// This just kind of caches all the subscription data.
+/**
+ * This just kind of caches all the subscription data.
+ */
 function loadSubscriptions()
 {
 	global $context, $txt, $modSettings, $smcFunc;
@@ -1639,7 +1904,7 @@ function loadSubscriptions()
 	while ($row = $smcFunc['db_fetch_assoc']($request))
 	{
 		// Pick a cost.
-		$costs = safe_unserialize($row['cost']);
+		$costs = $smcFunc['json_decode']($row['cost'], true);
 
 		if ($row['length'] != 'F' && !empty($modSettings['paid_currency_symbol']) && !empty($costs['fixed']))
 			$cost = sprintf($modSettings['paid_currency_symbol'], $costs['fixed']);
@@ -1698,7 +1963,7 @@ function loadSubscriptions()
 
 	// Do the counts.
 	$request = $smcFunc['db_query']('', '
-		SELECT COUNT(id_sublog) AS member_count, id_subscribe, status
+		SELECT COUNT(*) AS member_count, id_subscribe, status
 		FROM {db_prefix}log_subscribed
 		GROUP BY id_subscribe, status',
 		array(
@@ -1729,7 +1994,14 @@ function loadSubscriptions()
 	$smcFunc['db_free_result']($request);
 }
 
-// Load all the payment gateways.
+/**
+ * Load all the payment gateways.
+ * Checks the Sources directory for any files fitting the format of a payment gateway,
+ * loads each file to check it's valid, includes each file and returns the
+ * function name and whether it should work with this version of SMF.
+ *
+ * @return array An array of information about available payment gateways
+ */
 function loadPaymentGateways()
 {
 	global $sourcedir;
@@ -1739,7 +2011,7 @@ function loadPaymentGateways()
 	{
 		while (($file = readdir($dh)) !== false)
 		{
-			if (is_file($sourcedir .'/'. $file) && preg_match('~^Subscriptions-([A-Za-z\d]+)\.php$~', $file, $matches))
+			if (is_file($sourcedir . '/' . $file) && preg_match('~^Subscriptions-([A-Za-z\d]+)\.php$~', $file, $matches))
 			{
 				// Check this is definitely a valid gateway!
 				$fp = fopen($sourcedir . '/' . $file, 'rb');
@@ -1748,12 +2020,12 @@ function loadPaymentGateways()
 
 				if (strpos($header, '// SMF Payment Gateway: ' . strtolower($matches[1])) !== false)
 				{
-					loadClassFile($file);
+					require_once($sourcedir . '/' . $file);
 
 					$gateways[] = array(
 						'filename' => $file,
 						'code' => strtolower($matches[1]),
-						// Don't need anything snazier than this yet.
+						// Don't need anything snazzier than this yet.
 						'valid_version' => class_exists(strtolower($matches[1]) . '_payment') && class_exists(strtolower($matches[1]) . '_display'),
 						'payment_class' => strtolower($matches[1]) . '_payment',
 						'display_class' => strtolower($matches[1]) . '_display',

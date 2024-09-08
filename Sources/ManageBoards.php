@@ -1,74 +1,32 @@
 <?php
 
 /**
+ * Manage and maintain the boards and categories of the forum.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0
+ * @version 2.1.0
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/* Manage and maintain the boards and categories of the forum.
-
-	void ManageBoards()
-		- main entry point for all the manageboards admin screens.
-		- called by ?action=admin;area=manageboards.
-		- checks the permissions, based on the sub-action.
-		- loads the ManageBoards language file.
-		- calls a function based on the sub-action.
-
-	void ManageBoardsMain()
-		- main screen showing all boards and categories.
-		- called by ?action=admin;area=manageboards or ?action=admin;area=manageboards;sa=move.
-		- uses the main template of the ManageBoards template.
-		- requires manage_boards permission.
-		- also handles the interface for moving boards.
-
-	void EditCategory()
-		- screen for editing and repositioning a category.
-		- called by ?action=admin;area=manageboards;sa=cat
-		- uses the modify_category sub-template of the ManageBoards template.
-		- requires manage_boards permission.
-		- also used to show the confirm deletion of category screen
-		  (sub-template confirm_category_delete).
-
-	void EditCategory2()
-		- function for handling a submitted form saving the category.
-		- called by ?action=admin;area=manageboards;sa=cat2
-		- requires manage_boards permission.
-		- also handles deletion of a category.
-		- redirects to ?action=admin;area=manageboards.
-
-	void EditBoard()
-		- screen for editing and repositioning a board.
-		- called by ?action=admin;area=manageboards;sa=board
-		- uses the modify_board sub-template of the ManageBoards template.
-		- requires manage_boards permission.
-		- also used to show the confirm deletion of category screen
-		  (sub-template confirm_board_delete).
-
-	void EditBoard2()
-		- function for handling a submitted form saving the board.
-		- called by ?action=admin;area=manageboards;sa=board2
-		- requires manage_boards permission.
-		- also handles deletion of a board.
-		- redirects to ?action=admin;area=manageboards.
-
-	void EditBoardSettings()
-		- a screen to set a few general board and category settings.
-		- uses the modify_general_settings sub template.
-*/
-
-// The controller; doesn't do anything, just delegates.
+/**
+ * The main dispatcher; doesn't do anything, just delegates.
+ * This is the main entry point for all the manageboards admin screens.
+ * Called by ?action=admin;area=manageboards.
+ * It checks the permissions, based on the sub-action, and calls a function based on the sub-action.
+ *
+ * Uses ManageBoards language file.
+ */
 function ManageBoards()
 {
-	global $context, $txt, $scripturl;
+	global $context, $txt;
 
 	// Everything's gonna need this.
 	loadLanguage('ManageBoards');
@@ -86,12 +44,6 @@ function ManageBoards()
 		'settings' => array('EditBoardSettings', 'admin_forum'),
 	);
 
-	// Default to sub action 'main' or 'settings' depending on permissions.
-	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (allowedTo('manage_boards') ? 'main' : 'settings');
-
-	// Have you got the proper permissions?
-	isAllowedTo($subActions[$_REQUEST['sa']][1]);
-
 	// Create the tabs for the template.
 	$context[$context['admin_menu_name']]['tab_data'] = array(
 		'title' => $txt['boards_and_cats'],
@@ -108,13 +60,28 @@ function ManageBoards()
 		),
 	);
 
-	$subActions[$_REQUEST['sa']][0]();
+	call_integration_hook('integrate_manage_boards', array(&$subActions));
+
+	// Default to sub action 'main' or 'settings' depending on permissions.
+	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (allowedTo('manage_boards') ? 'main' : 'settings');
+
+	// Have you got the proper permissions?
+	isAllowedTo($subActions[$_REQUEST['sa']][1]);
+
+	call_helper($subActions[$_REQUEST['sa']][0]);
 }
 
-// The main control panel thing.
+/**
+ * The main control panel thing, the screen showing all boards and categories.
+ * Called by ?action=admin;area=manageboards or ?action=admin;area=manageboards;sa=move.
+ * Requires manage_boards permission.
+ * It also handles the interface for moving boards.
+ *
+ * Uses ManageBoards template, main sub-template.
+ */
 function ManageBoardsMain()
 {
-	global $txt, $context, $cat_tree, $boards, $boardList, $scripturl, $sourcedir, $txt;
+	global $txt, $context, $cat_tree, $boards, $boardList, $scripturl, $sourcedir, $smcFunc;
 
 	loadTemplate('ManageBoards');
 
@@ -123,6 +90,8 @@ function ManageBoardsMain()
 	if (isset($_REQUEST['sa']) && $_REQUEST['sa'] == 'move' && in_array($_REQUEST['move_to'], array('child', 'before', 'after', 'top')))
 	{
 		checkSession('get');
+		validateToken('admin-bm-' . (int) $_REQUEST['src_board'], 'request');
+
 		if ($_REQUEST['move_to'] === 'top')
 			$boardOptions = array(
 				'move_to' => $_REQUEST['move_to'],
@@ -160,40 +129,47 @@ function ManageBoardsMain()
 				'child_level' => &$boards[$boardid]['level'],
 				'move' => $move_cat && ($boardid == $context['move_board'] || isChildOf($boardid, $context['move_board'])),
 				'permission_profile' => &$boards[$boardid]['profile'],
+				'is_redirect' => !empty($boards[$boardid]['redirect']),
 			);
 		}
 	}
 
 	if (!empty($context['move_board']))
 	{
-		$context['move_title'] = sprintf($txt['mboards_select_destination'], htmlspecialchars($boards[$context['move_board']]['name']));
+		createToken('admin-bm-' . $context['move_board'], 'request');
+
+		$context['move_title'] = sprintf($txt['mboards_select_destination'], $smcFunc['htmlspecialchars']($boards[$context['move_board']]['name']));
 		foreach ($cat_tree as $catid => $tree)
 		{
 			$prev_child_level = 0;
 			$prev_board = 0;
 			$stack = array();
+			// Just a shortcut, this is the same for all the urls
+			$security = $context['session_var'] . '=' . $context['session_id'] . ';' . $context['admin-bm-' . $context['move_board'] . '_token_var'] . '=' . $context['admin-bm-' . $context['move_board'] . '_token'];
 			foreach ($boardList[$catid] as $boardid)
 			{
 				if (!isset($context['categories'][$catid]['move_link']))
 					$context['categories'][$catid]['move_link'] = array(
 						'child_level' => 0,
-						'label' => $txt['mboards_order_before'] . ' \'' . htmlspecialchars($boards[$boardid]['name']) . '\'',
-						'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=before;' . $context['session_var'] . '=' . $context['session_id'],
+						'label' => $txt['mboards_order_before'] . ' \'' . $smcFunc['htmlspecialchars']($boards[$boardid]['name']) . '\'',
+						'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=before;' . $security,
 					);
 
 				if (!$context['categories'][$catid]['boards'][$boardid]['move'])
-				$context['categories'][$catid]['boards'][$boardid]['move_links'] = array(
-					array(
-						'child_level' => $boards[$boardid]['level'],
-						'label' => $txt['mboards_order_after'] . '\'' . htmlspecialchars($boards[$boardid]['name']) . '\'',
-						'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=after;' . $context['session_var'] . '=' . $context['session_id'],
-					),
-					array(
-						'child_level' => $boards[$boardid]['level'] + 1,
-						'label' => $txt['mboards_order_child_of'] . ' \'' . htmlspecialchars($boards[$boardid]['name']) . '\'',
-						'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=child;' . $context['session_var'] . '=' . $context['session_id'],
-					),
-				);
+					$context['categories'][$catid]['boards'][$boardid]['move_links'] = array(
+						array(
+							'child_level' => $boards[$boardid]['level'],
+							'label' => $txt['mboards_order_after'] . '\'' . $smcFunc['htmlspecialchars']($boards[$boardid]['name']) . '\'',
+							'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=after;' . $security,
+							'class' => $boards[$boardid]['level'] > 0 ? 'above' : 'below',
+						),
+						array(
+							'child_level' => $boards[$boardid]['level'] + 1,
+							'label' => $txt['mboards_order_child_of'] . ' \'' . $smcFunc['htmlspecialchars']($boards[$boardid]['name']) . '\'',
+							'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_board=' . $boardid . ';move_to=child;' . $security,
+							'class' => 'here',
+						),
+					);
 
 				$difference = $boards[$boardid]['level'] - $prev_child_level;
 				if ($difference == 1)
@@ -209,7 +185,6 @@ function ManageBoardsMain()
 
 				$prev_board = $boardid;
 				$prev_child_level = $boards[$boardid]['level'];
-
 			}
 			if (!empty($stack) && !empty($context['categories'][$catid]['boards'][$prev_board]['move_links']))
 				$context['categories'][$catid]['boards'][$prev_board]['move_links'] = array_merge($stack, $context['categories'][$catid]['boards'][$prev_board]['move_links']);
@@ -219,23 +194,35 @@ function ManageBoardsMain()
 			if (empty($boardList[$catid]))
 				$context['categories'][$catid]['move_link'] = array(
 					'child_level' => 0,
-					'label' => $txt['mboards_order_before'] . ' \'' . htmlspecialchars($tree['node']['name']) . '\'',
-					'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_cat=' . $catid . ';move_to=top;' . $context['session_var'] . '=' . $context['session_id'],
+					'label' => $txt['mboards_order_before'] . ' \'' . $smcFunc['htmlspecialchars']($tree['node']['name']) . '\'',
+					'href' => $scripturl . '?action=admin;area=manageboards;sa=move;src_board=' . $context['move_board'] . ';target_cat=' . $catid . ';move_to=top;' . $security,
 				);
 		}
 	}
+
+	call_integration_hook('integrate_boards_main');
 
 	$context['page_title'] = $txt['boards_and_cats'];
 	$context['can_manage_permissions'] = allowedTo('manage_permissions');
 }
 
-// Modify a specific category.
+/**
+ * Modify a specific category.
+ * (screen for editing and repositioning a category.)
+ * Also used to show the confirm deletion of category screen
+ * (sub-template confirm_category_delete).
+ * Called by ?action=admin;area=manageboards;sa=cat
+ * Requires manage_boards permission.
+ *
+ * @uses template_modify_category()
+ */
 function EditCategory()
 {
-	global $txt, $context, $cat_tree, $boardList, $boards, $sourcedir;
+	global $txt, $context, $cat_tree, $boardList, $boards, $smcFunc, $sourcedir;
 
 	loadTemplate('ManageBoards');
 	require_once($sourcedir . '/Subs-Boards.php');
+	require_once($sourcedir . '/Subs-Editor.php');
 	getBoardTree();
 
 	// id_cat must be a number.... if it exists.
@@ -257,7 +244,8 @@ function EditCategory()
 		$context['category'] = array(
 			'id' => 0,
 			'name' => $txt['mboards_new_cat_name'],
-			'editable_name' => htmlspecialchars($txt['mboards_new_cat_name']),
+			'editable_name' => $smcFunc['htmlspecialchars']($txt['mboards_new_cat_name']),
+			'description' => '',
 			'can_collapse' => true,
 			'is_new' => true,
 			'is_empty' => true
@@ -271,7 +259,8 @@ function EditCategory()
 		$context['category'] = array(
 			'id' => $_REQUEST['cat'],
 			'name' => $cat_tree[$_REQUEST['cat']]['node']['name'],
-			'editable_name' => htmlspecialchars($cat_tree[$_REQUEST['cat']]['node']['name']),
+			'editable_name' => $cat_tree[$_REQUEST['cat']]['node']['name'],
+			'description' => $cat_tree[$_REQUEST['cat']]['node']['description'],
 			'can_collapse' => !empty($cat_tree[$_REQUEST['cat']]['node']['can_collapse']),
 			'children' => array(),
 			'is_empty' => empty($cat_tree[$_REQUEST['cat']]['children'])
@@ -298,23 +287,38 @@ function EditCategory()
 	if (!isset($_REQUEST['delete']))
 	{
 		$context['sub_template'] = 'modify_category';
-		$context['page_title'] = $_REQUEST['sa'] == 'newcat' ? $txt['mboards_new_cat_name'] : $txt['catEdit'];
+		$context['page_title'] = $_REQUEST['sa'] == 'newcat' ? $txt['mboards_new_cat_name'] : $txt['cat_edit'];
 	}
 	else
 	{
 		$context['sub_template'] = 'confirm_category_delete';
 		$context['page_title'] = $txt['mboards_delete_cat'];
 	}
+
+	// Create a special token.
+	createToken('admin-bc-' . $_REQUEST['cat']);
+	$context['token_check'] = 'admin-bc-' . $_REQUEST['cat'];
+
+	call_integration_hook('integrate_edit_category');
 }
 
-// Complete the modifications to a specific category.
+/**
+ * Function for handling a submitted form saving the category.
+ * (complete the modifications to a specific category.)
+ * It also handles deletion of a category.
+ * It requires manage_boards permission.
+ * Called by ?action=admin;area=manageboards;sa=cat2
+ * Redirects to ?action=admin;area=manageboards.
+ */
 function EditCategory2()
 {
-	global $sourcedir;
+	global $sourcedir, $smcFunc, $context;
 
 	checkSession();
+	validateToken('admin-bc-' . $_REQUEST['cat']);
 
 	require_once($sourcedir . '/Subs-Categories.php');
+	require_once($sourcedir . '/Subs-Editor.php');
 
 	$_POST['cat'] = (int) $_POST['cat'];
 
@@ -326,13 +330,14 @@ function EditCategory2()
 		if (isset($_POST['cat_order']))
 			$catOptions['move_after'] = (int) $_POST['cat_order'];
 
-		// Change "This & That" to "This &amp; That" but don't change "&cent" to "&amp;cent;"...
-		$catOptions['cat_name'] = preg_replace('~[&]([^;]{8}|[^;]{0,8}$)~', '&amp;$1', $_POST['cat_name']);
-
+		// Try and get any valid HTML to BBC first, add a naive attempt to strip it off, htmlspecialchars for the rest
+		$catOptions['cat_name'] = $smcFunc['htmlspecialchars'](strip_tags($_POST['cat_name']));
+		$catOptions['cat_desc'] = $smcFunc['htmlspecialchars'](strip_tags(html_to_bbc($_POST['cat_desc'])));
 		$catOptions['is_collapsible'] = isset($_POST['collapse']);
 
 		if (isset($_POST['add']))
 			createCategory($catOptions);
+
 		else
 			modifyCategory($_POST['cat'], $catOptions);
 	}
@@ -360,13 +365,22 @@ function EditCategory2()
 	redirectexit('action=admin;area=manageboards');
 }
 
-// Modify a specific board...
+/**
+ * Modify a specific board...
+ * screen for editing and repositioning a board.
+ * called by ?action=admin;area=manageboards;sa=board
+ * uses the modify_board sub-template of the ManageBoards template.
+ * requires manage_boards permission.
+ * also used to show the confirm deletion of category screen (sub-template confirm_board_delete).
+ */
 function EditBoard()
 {
-	global $txt, $context, $cat_tree, $boards, $boardList, $sourcedir, $smcFunc, $modSettings;
+	global $txt, $context, $cat_tree, $boards, $boardList;
+	global $sourcedir, $smcFunc, $modSettings;
 
 	loadTemplate('ManageBoards');
 	require_once($sourcedir . '/Subs-Boards.php');
+	require_once($sourcedir . '/Subs-Editor.php');
 	getBoardTree();
 
 	// For editing the profile we'll need this.
@@ -374,15 +388,21 @@ function EditBoard()
 	require_once($sourcedir . '/ManagePermissions.php');
 	loadPermissionProfiles();
 
+	// People with manage-boards are special.
+	require_once($sourcedir . '/Subs-Members.php');
+	$groups = groupsAllowedTo('manage_boards', null);
+	$context['board_managers'] = $groups['allowed']; // We don't need *all* this in $context.
+
 	// id_board must be a number....
 	$_REQUEST['boardid'] = isset($_REQUEST['boardid']) ? (int) $_REQUEST['boardid'] : 0;
+
 	if (!isset($boards[$_REQUEST['boardid']]))
 	{
 		$_REQUEST['boardid'] = 0;
 		$_REQUEST['sa'] = 'newboard';
 	}
 
-	if ($_REQUEST['sa'] == 'newboard')
+	if ('newboard' === $_REQUEST['sa'])
 	{
 		// Category doesn't exist, man... sorry.
 		if (empty($_REQUEST['cat']))
@@ -391,6 +411,7 @@ function EditBoard()
 		// Some things that need to be setup for a new board.
 		$curBoard = array(
 			'member_groups' => array(0, -1),
+			'deny_groups' => array(),
 			'category' => (int) $_REQUEST['cat']
 		);
 		$context['board_order'] = array();
@@ -415,8 +436,6 @@ function EditBoard()
 		// Just some easy shortcuts.
 		$curBoard = &$boards[$_REQUEST['boardid']];
 		$context['board'] = $boards[$_REQUEST['boardid']];
-		$context['board']['name'] = htmlspecialchars(strtr($context['board']['name'], array('&amp;' => '&')));
-		$context['board']['description'] = htmlspecialchars($context['board']['description']);
 		$context['board']['no_children'] = empty($boards[$_REQUEST['boardid']]['tree']['children']);
 		$context['board']['is_recycle'] = !empty($modSettings['recycle_enable']) && !empty($modSettings['recycle_board']) && $modSettings['recycle_board'] == $context['board']['id'];
 	}
@@ -432,13 +451,15 @@ function EditBoard()
 		-1 => array(
 			'id' => '-1',
 			'name' => $txt['parent_guests_only'],
-			'checked' => in_array('-1', $curBoard['member_groups']),
+			'allow' => in_array('-1', $curBoard['member_groups']),
+			'deny' => in_array('-1', $curBoard['deny_groups']),
 			'is_post_group' => false,
 		),
 		0 => array(
 			'id' => '0',
 			'name' => $txt['parent_members_only'],
-			'checked' => in_array('0', $curBoard['member_groups']),
+			'allow' => in_array('0', $curBoard['member_groups']),
+			'deny' => in_array('0', $curBoard['deny_groups']),
 			'is_post_group' => false,
 		)
 	);
@@ -462,7 +483,8 @@ function EditBoard()
 		$context['groups'][(int) $row['id_group']] = array(
 			'id' => $row['id_group'],
 			'name' => trim($row['group_name']),
-			'checked' => in_array($row['id_group'], $curBoard['member_groups']),
+			'allow' => in_array($row['id_group'], $curBoard['member_groups']),
+			'deny' => in_array($row['id_group'], $curBoard['deny_groups']),
 			'is_post_group' => $row['min_posts'] != -1,
 		);
 	}
@@ -501,8 +523,9 @@ function EditBoard()
 	{
 		$context['can_move_children'] = false;
 		$context['children'] = $boards[$_REQUEST['boardid']]['tree']['children'];
-		foreach ($context['board_order'] as $board)
-			if ($board['is_child'] == false && $board['selected'] == false)
+
+		foreach ($context['board_order'] as $lBoard)
+			if ($lBoard['is_child'] == false && $lBoard['selected'] == false)
 				$context['can_move_children'] = true;
 	}
 
@@ -534,13 +557,33 @@ function EditBoard()
 	if (!empty($context['board']['moderators']))
 		list ($context['board']['last_moderator_id']) = array_slice(array_keys($context['board']['moderators']), -1);
 
+	// Get all the groups assigned as moderators
+	$request = $smcFunc['db_query']('', '
+		SELECT id_group
+		FROM {db_prefix}moderator_groups
+		WHERE id_board = {int:current_board}',
+		array(
+			'current_board' => $_REQUEST['boardid'],
+		)
+	);
+	$context['board']['moderator_groups'] = array();
+	while ($row = $smcFunc['db_fetch_assoc']($request))
+		$context['board']['moderator_groups'][$row['id_group']] = $context['groups'][$row['id_group']]['name'];
+	$smcFunc['db_free_result']($request);
+
+	$context['board']['moderator_groups_list'] = empty($context['board']['moderator_groups']) ? '' : '&quot;' . implode('&quot;, &qout;', $context['board']['moderator_groups']) . '&quot;';
+
+	if (!empty($context['board']['moderator_groups']))
+		list ($context['board']['last_moderator_group_id']) = array_slice(array_keys($context['board']['moderator_groups']), -1);
+
 	// Get all the themes...
 	$request = $smcFunc['db_query']('', '
 		SELECT id_theme AS id, value AS name
 		FROM {db_prefix}themes
-		WHERE variable = {string:name}',
+		WHERE variable = {literal:name}
+			AND id_theme IN ({array_int:enable_themes})',
 		array(
-			'name' => 'name',
+			'enable_themes' => explode(',', $modSettings['enableThemes']),
 		)
 	);
 	$context['themes'] = array();
@@ -551,25 +594,39 @@ function EditBoard()
 	if (!isset($_REQUEST['delete']))
 	{
 		$context['sub_template'] = 'modify_board';
-		$context['page_title'] = $txt['boardsEdit'];
+		$context['page_title'] = $txt['boards_edit'];
+		loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
 	}
 	else
 	{
 		$context['sub_template'] = 'confirm_board_delete';
 		$context['page_title'] = $txt['mboards_delete_board'];
 	}
+
+	// Create a special token.
+	createToken('admin-be-' . $_REQUEST['boardid']);
+
+	call_integration_hook('integrate_edit_board');
 }
 
-// Make changes to/delete a board.
+/**
+ * Make changes to/delete a board.
+ * (function for handling a submitted form saving the board.)
+ * It also handles deletion of a board.
+ * Called by ?action=admin;area=manageboards;sa=board2
+ * Redirects to ?action=admin;area=manageboards.
+ * It requires manage_boards permission.
+ */
 function EditBoard2()
 {
-	global $txt, $sourcedir, $modSettings, $smcFunc, $context;
-
-	checkSession();
-
-	require_once($sourcedir . '/Subs-Boards.php');
+	global $sourcedir, $smcFunc, $context;
 
 	$_POST['boardid'] = (int) $_POST['boardid'];
+	checkSession();
+	validateToken('admin-be-' . $_REQUEST['boardid']);
+
+	require_once($sourcedir . '/Subs-Boards.php');
+	require_once($sourcedir . '/Subs-Editor.php');
 
 	// Mode: modify aka. don't delete.
 	if (isset($_POST['edit']) || isset($_POST['add']))
@@ -597,14 +654,23 @@ function EditBoard2()
 		$boardOptions['override_theme'] = isset($_POST['override_theme']);
 		$boardOptions['board_theme'] = (int) $_POST['boardtheme'];
 		$boardOptions['access_groups'] = array();
+		$boardOptions['deny_groups'] = array();
 
 		if (!empty($_POST['groups']))
-			foreach ($_POST['groups'] as $group)
-				$boardOptions['access_groups'][] = (int) $group;
+			foreach ($_POST['groups'] as $group => $action)
+			{
+				if ($action == 'allow')
+					$boardOptions['access_groups'][] = (int) $group;
+				elseif ($action == 'deny')
+					$boardOptions['deny_groups'][] = (int) $group;
+			}
 
-		// Change '1 & 2' to '1 &amp; 2', but not '&amp;' to '&amp;amp;'...
-		$boardOptions['board_name'] = preg_replace('~[&]([^;]{8}|[^;]{0,8}$)~', '&amp;$1', $_POST['board_name']);
-		$boardOptions['board_description'] = preg_replace('~[&]([^;]{8}|[^;]{0,8}$)~', '&amp;$1', $_POST['desc']);
+		if (strlen(implode(',', $boardOptions['access_groups'])) > 255 || strlen(implode(',', $boardOptions['deny_groups'])) > 255)
+			fatal_lang_error('too_many_groups', false);
+
+		// Try and get any valid HTML to BBC first, add a naive attempt to strip it off, htmlspecialchars for the rest
+		$boardOptions['board_name'] = $smcFunc['htmlspecialchars'](strip_tags($_POST['board_name']));
+		$boardOptions['board_description'] = $smcFunc['htmlspecialchars'](strip_tags(html_to_bbc($_POST['desc'])));
 
 		$boardOptions['moderator_string'] = $_POST['moderators'];
 
@@ -613,40 +679,54 @@ function EditBoard2()
 			$moderators = array();
 			foreach ($_POST['moderator_list'] as $moderator)
 				$moderators[(int) $moderator] = (int) $moderator;
+
 			$boardOptions['moderators'] = $moderators;
 		}
 
+		$boardOptions['moderator_group_string'] = $_POST['moderator_groups'];
+
+		if (isset($_POST['moderator_group_list']) && is_array($_POST['moderator_group_list']))
+		{
+			$moderator_groups = array();
+			foreach ($_POST['moderator_group_list'] as $moderator_group)
+				$moderator_groups[(int) $moderator_group] = (int) $moderator_group;
+			$boardOptions['moderator_groups'] = $moderator_groups;
+		}
+
 		// Are they doing redirection?
-		$boardOptions['redirect'] = !empty($_POST['redirect_enable']) && isset($_POST['redirect_address']) && trim($_POST['redirect_address']) != '' ? trim($_POST['redirect_address']) : '';
+		$boardOptions['redirect'] = !empty($_POST['redirect_enable']) && isset($_POST['redirect_address']) && trim($_POST['redirect_address']) != '' ? normalize_iri(trim($_POST['redirect_address'])) : '';
 
 		// Profiles...
-		$boardOptions['profile'] = $_POST['profile'];
+		$boardOptions['profile'] = $_POST['profile'] == -1 ? 1 : $_POST['profile'];
 		$boardOptions['inherit_permissions'] = $_POST['profile'] == -1;
 
 		// We need to know what used to be case in terms of redirection.
 		if (!empty($_POST['boardid']))
 		{
 			$request = $smcFunc['db_query']('', '
-				SELECT redirect, num_posts
+				SELECT redirect, num_posts, id_cat
 				FROM {db_prefix}boards
 				WHERE id_board = {int:current_board}',
 				array(
 					'current_board' => $_POST['boardid'],
 				)
 			);
-			list ($oldRedirect, $numPosts) = $smcFunc['db_fetch_row']($request);
+			list ($oldRedirect, $numPosts, $old_id_cat) = $smcFunc['db_fetch_row']($request);
 			$smcFunc['db_free_result']($request);
 
 			// If we're turning redirection on check the board doesn't have posts in it - if it does don't make it a redirection board.
 			if ($boardOptions['redirect'] && empty($oldRedirect) && $numPosts)
 				unset($boardOptions['redirect']);
+
 			// Reset the redirection count when switching on/off.
 			elseif (empty($boardOptions['redirect']) != empty($oldRedirect))
 				$boardOptions['num_posts'] = 0;
+
 			// Resetting the count?
 			elseif ($boardOptions['redirect'] && !empty($_POST['reset_redirect']))
 				$boardOptions['num_posts'] = 0;
 
+			$boardOptions['old_id_cat'] = $old_id_cat;
 		}
 
 		// Create a new board...
@@ -690,9 +770,12 @@ function EditBoard2()
 		redirectexit('action=admin;area=manageboards');
 }
 
+/**
+ * Used to retrieve data for modifying a board category
+ */
 function ModifyCat()
 {
-	global $cat_tree, $boardList, $boards, $sourcedir, $smcFunc;
+	global $boards, $sourcedir, $smcFunc;
 
 	// Get some information about the boards and the cats.
 	require_once($sourcedir . '/Subs-Boards.php');
@@ -728,12 +811,18 @@ function ModifyCat()
 	redirectexit();
 }
 
+/**
+ * A screen to set a few general board and category settings.
+ *
+ * @uses template_show_settings()
+ * @param bool $return_config Whether to return the $config_vars array (used for admin search)
+ * @return void|array Returns nothing or the array of config vars if $return_config is true
+ */
 function EditBoardSettings($return_config = false)
 {
-	global $context, $txt, $sourcedir, $modSettings, $scripturl, $smcFunc;
+	global $context, $txt, $sourcedir, $scripturl, $smcFunc, $modSettings;
 
 	// Load the boards list - for the recycle bin!
-	$recycle_boards = array('');
 	$request = $smcFunc['db_query']('order_by_board_order', '
 		SELECT b.id_board, b.name AS board_name, c.name AS cat_name
 		FROM {db_prefix}boards AS b
@@ -747,29 +836,44 @@ function EditBoardSettings($return_config = false)
 		$recycle_boards[$row['id_board']] = $row['cat_name'] . ' - ' . $row['board_name'];
 	$smcFunc['db_free_result']($request);
 
+	if (!empty($recycle_boards))
+	{
+		require_once($sourcedir . '/Subs-Boards.php');
+		sortBoards($recycle_boards);
+		$recycle_boards = array('') + $recycle_boards;
+	}
+	else
+		$recycle_boards = array('');
+
+	// If this setting is missing, set it to 1
+	if (empty($modSettings['boardindex_max_depth']))
+		$modSettings['boardindex_max_depth'] = 1;
+
 	// Here and the board settings...
 	$config_vars = array(
 		array('title', 'settings'),
-			// Inline permissions.
-			array('permissions', 'manage_boards'),
+		// Inline permissions.
+		array('permissions', 'manage_boards'),
 		'',
-			// Other board settings.
-			array('check', 'countChildPosts'),
-			array('check', 'recycle_enable', 'onclick' => 'document.getElementById(\'recycle_board\').disabled = !this.checked;'),
-			array('select', 'recycle_board', $recycle_boards),
-			array('check', 'allow_ignore_boards'),
+
+		// Other board settings.
+		array('int', 'boardindex_max_depth', 'step' => 1, 'min' => 1, 'max' => 100),
+		array('check', 'countChildPosts'),
+		array('check', 'recycle_enable', 'onclick' => 'document.getElementById(\'recycle_board\').disabled = !this.checked;'),
+		array('select', 'recycle_board', $recycle_boards),
+		array('check', 'allow_ignore_boards'),
+		array('check', 'deny_boards_access'),
 	);
+
+	call_integration_hook('integrate_modify_board_settings', array(&$config_vars));
 
 	if ($return_config)
 		return $config_vars;
 
-	// Needed for the settings template and inline permission functions.
-	require_once($sourcedir . '/ManagePermissions.php');
+	// Needed for the settings template.
 	require_once($sourcedir . '/ManageServer.php');
 
-	// Don't let guests have these permissions.
 	$context['post_url'] = $scripturl . '?action=admin;area=manageboards;save;sa=settings';
-	$context['permissions_excluded'] = array(-1);
 
 	$context['page_title'] = $txt['boards_and_cats'] . ' - ' . $txt['settings'];
 
@@ -777,10 +881,8 @@ function EditBoardSettings($return_config = false)
 	$context['sub_template'] = 'show_settings';
 
 	// Add some javascript stuff for the recycle box.
-	$context['settings_insert_below'] = '
-		<script type="text/javascript"><!-- // --><![CDATA[
-			document.getElementById("recycle_board").disabled = !document.getElementById("recycle_enable").checked;
-		// ]]></script>';
+	addInlineJavaScript('
+	document.getElementById("recycle_board").disabled = !document.getElementById("recycle_enable").checked;', true);
 
 	// Warn the admin against selecting the recycle topic without selecting a board.
 	$context['force_form_onsubmit'] = 'if(document.getElementById(\'recycle_enable\').checked && document.getElementById(\'recycle_board\').value == 0) { return confirm(\'' . $txt['recycle_board_unselected_notice'] . '\');} return true;';
@@ -790,9 +892,15 @@ function EditBoardSettings($return_config = false)
 	{
 		checkSession();
 
+		call_integration_hook('integrate_save_board_settings');
+
 		saveDBSettings($config_vars);
+		$_SESSION['adm-save'] = true;
 		redirectexit('action=admin;area=manageboards;sa=settings');
 	}
+
+	// We need this for the in-line permissions
+	createToken('admin-mp');
 
 	// Prepare the settings...
 	prepareDBSettingContext($config_vars);

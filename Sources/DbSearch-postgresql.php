@@ -1,35 +1,24 @@
 <?php
 
 /**
+ * This file contains database functions specific to search related activity.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2023 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.7
+ * @version 2.1.4
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file contains database functions specific to search related activity.
-
-	void db_search_init()
-		- adds the functions in this file to the $smcFunc array
-
-	boolean smf_db_search_support($search_type)
-		- whether this database type support the search type $search_type
-
-	void smf_db_create_word_search($size)
- 		- create the custom word index table
-
-	resource smf_db_search_query($identifier, $db_string, $db_values = array(), $connection = null)
-		- returns the correct query for this search type.
-*/
-
-// Add the file functions to the $smcFunc array.
+/**
+ *  Add the file functions to the $smcFunc array.
+ */
 function db_search_init()
 {
 	global $smcFunc;
@@ -40,57 +29,94 @@ function db_search_init()
 			'db_search_support' => 'smf_db_search_support',
 			'db_create_word_search' => 'smf_db_create_word_search',
 			'db_support_ignore' => false,
+			'db_search_language' => 'smf_db_search_language',
 		);
+
+	db_extend();
+
+	$smcFunc['db_support_ignore'] = true;
+	$smcFunc['db_supports_pcre'] = true;
 }
 
-// Does this database type support this search type?
+/**
+ * This function will tell you whether this database type supports this search type.
+ *
+ * @param string $search_type The search type
+ * @return boolean Whether or not the specified search type is supported by this DB system.
+ */
 function smf_db_search_support($search_type)
 {
-	$supported_types = array('custom');
+	$supported_types = array('custom', 'fulltext');
 
 	return in_array($search_type, $supported_types);
 }
 
-// Returns the correct query for this search type.
+/**
+ * Returns the correct query for this search type.
+ *
+ * @param string $identifier A query identifier
+ * @param string $db_string The query text
+ * @param array $db_values An array of values to pass to $smcFunc['db_query']
+ * @param resource $connection The current DB connection resource
+ * @return resource The query result resource from $smcFunc['db_query']
+ */
 function smf_db_search_query($identifier, $db_string, $db_values = array(), $connection = null)
 {
 	global $smcFunc;
 
 	$replacements = array(
 		'create_tmp_log_search_topics' => array(
-			'~mediumint\(\d\)~i' => 'int',
-			'~unsigned~i' => '',
 			'~ENGINE=MEMORY~i' => '',
 		),
 		'create_tmp_log_search_messages' => array(
-			'~mediumint\(\d\)' => 'int',
-			'~unsigned~i' => '',
-			'~TYPE=HEAP~i' => '',
-		),
-		'drop_tmp_log_search_topics' => array(
-			'~IF\sEXISTS~i' => '',
-		),
-		'drop_tmp_log_search_messages' => array(
-			'~IF\sEXISTS~i' => '',
+			'~ENGINE=MEMORY~i' => '',
 		),
 		'insert_into_log_messages_fulltext' => array(
-			'~NOT\sRLIKE~i' => '!~*',
-			'~RLIKE~i' => '~*',
+			'/NOT\sLIKE/' => 'NOT ILIKE',
+			'/\bLIKE\b/' => 'ILIKE',
+			'/NOT RLIKE/' => '!~*',
+			'/RLIKE/' => '~*',
 		),
 		'insert_log_search_results_subject' => array(
-			'~NOT\sRLIKE~i' => '!~*',
-			'~RLIKE~i' => '~*',
+			'/NOT\sLIKE/' => 'NOT ILIKE',
+			'/\bLIKE\b/' => 'ILIKE',
+			'/NOT RLIKE/' => '!~*',
+			'/RLIKE/' => '~*',
+		),
+		'insert_log_search_topics' => array(
+			'/NOT\sLIKE/' => 'NOT ILIKE',
+			'/\bLIKE\b/' => 'ILIKE',
+			'/NOT RLIKE/' => '!~*',
+			'/RLIKE/' => '~*',
+		),
+		'insert_log_search_results_no_index' => array(
+			'/NOT\sLIKE/' => 'NOT ILIKE',
+			'/\bLIKE\b/' => 'ILIKE',
+			'/NOT RLIKE/' => '!~*',
+			'/RLIKE/' => '~*',
 		),
 	);
 
 	if (isset($replacements[$identifier]))
 		$db_string = preg_replace(array_keys($replacements[$identifier]), array_values($replacements[$identifier]), $db_string);
-	elseif (preg_match('~^\s*INSERT\sIGNORE~i', $db_string) != 0)
+	if (preg_match('~^\s*INSERT\sIGNORE~i', $db_string) != 0)
 	{
 		$db_string = preg_replace('~^\s*INSERT\sIGNORE~i', 'INSERT', $db_string);
-		// Don't error on multi-insert.
-		$db_values['db_error_skip'] = true;
+		if ($smcFunc['db_support_ignore'])
+		{
+			//pg style "INSERT INTO.... ON CONFLICT DO NOTHING"
+			$db_string = $db_string . ' ON CONFLICT DO NOTHING';
+		}
+		else
+		{
+			// Don't error on multi-insert.
+			$db_values['db_error_skip'] = true;
+		}
 	}
+
+	//fix double quotes
+	if ($identifier == 'insert_into_log_messages_fulltext')
+		$db_string = str_replace('"', "'", $db_string);
 
 	$return = $smcFunc['db_query']('', $db_string,
 		$db_values, $connection
@@ -99,7 +125,11 @@ function smf_db_search_query($identifier, $db_string, $db_values = array(), $con
 	return $return;
 }
 
-// Highly specific - create the custom word index table!
+/**
+ * Highly specific function, to create the custom word index table.
+ *
+ * @param string $size The column size type (int, mediumint (8), etc.). Not used here.
+ */
 function smf_db_create_word_search($size)
 {
 	global $smcFunc;
@@ -117,6 +147,43 @@ function smf_db_create_word_search($size)
 			'string_zero' => '0',
 		)
 	);
+}
+
+/**
+ * Return the language for the textsearch index
+ */
+function smf_db_search_language()
+{
+	global $smcFunc, $modSettings;
+
+	$language_ftx = 'english';
+
+	if (!empty($modSettings['search_language']))
+		$language_ftx = $modSettings['search_language'];
+	else
+	{
+		$request = $smcFunc['db_query']('', '
+			SELECT cfgname FROM pg_ts_config WHERE oid = current_setting({string:default_language})::regconfig',
+			array(
+				'default_language' => 'default_text_search_config'
+			)
+		);
+
+		if ($request !== false && $smcFunc['db_num_rows']($request) == 1)
+		{
+			$row = $smcFunc['db_fetch_assoc']($request);
+			$language_ftx = $row['cfgname'];
+
+			$smcFunc['db_insert']('replace',
+				'{db_prefix}settings',
+				array('variable' => 'string', 'value' => 'string'),
+				array('search_language', $language_ftx),
+				array('variable')
+			);
+		}
+	}
+
+	return $language_ftx;
 }
 
 ?>

@@ -4,32 +4,33 @@
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0
+ * @version 2.1.0
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-class standard_search
+/**
+ * Standard non full index, non custom index search
+ */
+class standard_search extends search_api
 {
-	// This is the last version of SMF that this was tested on, to protect against API changes.
-	public $version_compatible = 'SMF 2.0';
-
-	// This won't work with versions of SMF less than this.
-	public $min_smf_version = 'SMF 2.0 Beta 2';
-
-	// Standard search is supported by default.
-	public $is_supported = true;
-
-	// Method to check whether the method can be performed by the API.
+	/**
+	 * {@inheritDoc}
+	 */
 	public function supportsMethod($methodName, $query_params = null)
 	{
-		// Always fall back to the standard search method.
-		return false;
+		$return = false;
+
+		// Maybe parent got support
+		if (!$return)
+			$return = parent::supportsMethod($methodName, $query_params);
+
+		return $return;
 	}
 }
 

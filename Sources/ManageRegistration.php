@@ -1,61 +1,34 @@
 <?php
 
 /**
+ * This file helps the administrator setting registration settings and policy
+ * as well as allow the administrator to register new members themselves.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.18
+ * @version 2.1.0
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file helps the administrator setting registration settings and policy
-	as well as allow the administrator to register new members themselves.
-
-	void RegCenter()
-		- entrance point for the registration center.
-		- accessed by ?action=admin;area=regcenter.
-		- requires either the moderate_forum or the admin_forum permission.
-		- loads the Login language file and the Register template.
-		- calls the right function based on the subaction.
-
-	void AdminRegister()
-		- a function to register a new member from the admin center.
-		- accessed by ?action=admin;area=regcenter;sa=register
-		- requires the moderate_forum permission.
-		- uses the admin_register sub template of the Register template.
-		- allows assigning a primary group to the member being registered.
-
-	void EditAgreement()
-		- allows the administrator to edit the registration agreement, and
-		  choose whether it should be shown or not.
-		- accessed by ?action=admin;area=regcenter;sa=agreement.
-		- uses the Admin template and the edit_agreement sub template.
-		- requires the admin_forum permission.
-		- uses the edit_agreement administration area.
-		- writes and saves the agreement to the agreement.txt file.
-
-	void SetReserve()
-		- set the names under which users are not allowed to register.
-		- accessed by ?action=admin;area=regcenter;sa=reservednames.
-		- requires the admin_forum permission.
-		- uses the reserved_words sub template of the Register template.
-
-	void ModifyRegistrationSettings()
-		- set general registration settings and Coppa compliance settings.
-		- accessed by ?action=admin;area=regcenter;sa=settings.
-		- requires the admin_forum permission.
-*/
-
-// Main handling function for the admin approval center
+/**
+ * Entrance point for the registration center, it checks permissions and forwards
+ * to the right function based on the subaction.
+ * Accessed by ?action=admin;area=regcenter.
+ * Requires either the moderate_forum or the admin_forum permission.
+ *
+ * Uses Login language file
+ * Uses Register template.
+ */
 function RegCenter()
 {
-	global $modSettings, $context, $txt, $scripturl;
+	global $context, $txt;
 
 	// Old templates might still request this.
 	if (isset($_REQUEST['sa']) && $_REQUEST['sa'] == 'browse')
@@ -65,7 +38,7 @@ function RegCenter()
 		'register' => array('AdminRegister', 'moderate_forum'),
 		'agreement' => array('EditAgreement', 'admin_forum'),
 		'policy' => array('EditPrivacyPolicy', 'admin_forum'),
-		'reservednames' => array('SetReserve', 'admin_forum'),
+		'reservednames' => array('SetReserved', 'admin_forum'),
 		'settings' => array('ModifyRegistrationSettings', 'admin_forum'),
 	);
 
@@ -103,22 +76,36 @@ function RegCenter()
 		)
 	);
 
+	call_integration_hook('integrate_manage_registrations', array(&$subActions));
+
 	// Finally, get around to calling the function...
-	$subActions[$context['sub_action']][0]();
+	call_helper($subActions[$context['sub_action']][0]);
 }
 
-// This function allows the admin to register a new member by hand.
+/**
+ * This function allows the admin to register a new member by hand.
+ * It also allows assigning a primary group to the member being registered.
+ * Accessed by ?action=admin;area=regcenter;sa=register
+ * Requires the moderate_forum permission.
+ *
+ * @uses template_admin_register()
+ */
 function AdminRegister()
 {
-	global $txt, $context, $sourcedir, $scripturl, $smcFunc, $modSettings;
+	global $txt, $context, $sourcedir, $scripturl, $smcFunc;
+
+	// Are there any custom profile fields required during registration?
+	require_once($sourcedir . '/Profile.php');
+	loadCustomFields(0, 'register');
 
 	if (!empty($_POST['regSubmit']))
 	{
 		checkSession();
+		validateToken('admin-regc');
 
 		foreach ($_POST as $key => $value)
 			if (!is_array($_POST[$key]))
-				$_POST[$key] = htmltrim__recursive(str_replace(array("\n", "\r"), '', $_POST[$key]));
+				$_POST[$key] = htmltrim__recursive(str_replace(array("\n", "\r"), '', $smcFunc['normalize']($_POST[$key])));
 
 		$regOptions = array(
 			'interface' => 'admin',
@@ -134,16 +121,17 @@ function AdminRegister()
 			'memberGroup' => empty($_POST['group']) || !allowedTo('manage_membergroups') ? 0 : (int) $_POST['group'],
 		);
 
-		if (empty($_POST['requireAgreement']) && empty($modSettings['force_gdpr']))
-			$regOptions['theme_vars']['agreement_accepted'] = time();
-
-		if (empty($_POST['requirePolicyAgreement']) && empty($modSettings['force_gdpr']))
-			$regOptions['theme_vars']['policy_accepted'] = time();
-
 		require_once($sourcedir . '/Subs-Members.php');
 		$memberID = registerMember($regOptions);
 		if (!empty($memberID))
 		{
+			// We'll do custom fields after as then we get to use the helper function!
+			if (!empty($_POST['customfield']))
+			{
+				require_once($sourcedir . '/Profile-Modify.php');
+				makeCustomFieldChanges($memberID, 'register');
+			}
+
 			$context['new_member'] = array(
 				'id' => $memberID,
 				'name' => $_POST['user'],
@@ -153,10 +141,6 @@ function AdminRegister()
 			$context['registration_done'] = sprintf($txt['admin_register_done'], $context['new_member']['link']);
 		}
 	}
-
-	// Basic stuff.
-	$context['sub_template'] = 'admin_register';
-	$context['page_title'] = $txt['registration_center'];
 
 	// Load the assignable member groups.
 	if (allowedTo('manage_membergroups'))
@@ -186,14 +170,27 @@ function AdminRegister()
 	}
 	else
 		$context['member_groups'] = array();
+
+	// Basic stuff.
+	$context['sub_template'] = 'admin_register';
+	$context['page_title'] = $txt['registration_center'];
+	createToken('admin-regc');
+	loadJavaScriptFile('register.js', array('defer' => false, 'minimize' => true), 'smf_register');
 }
 
-// I hereby agree not to be a lazy bum.
+/**
+ * Allows the administrator to edit the registration agreement, and choose whether
+ * it should be shown or not. It writes and saves the agreement to the agreement.txt
+ * file.
+ * Accessed by ?action=admin;area=regcenter;sa=agreement.
+ * Requires the admin_forum permission.
+ *
+ * @uses template_edit_agreement()
+ */
 function EditAgreement()
 {
+	// I hereby agree not to be a lazy bum.
 	global $txt, $boarddir, $context, $modSettings, $smcFunc, $user_info;
-
-	$context['force_gdpr'] = !empty($modSettings['force_gdpr']);
 
 	// By default we look at agreement.txt.
 	$context['current_agreement'] = '';
@@ -225,28 +222,32 @@ function EditAgreement()
 	if (isset($_POST['agreement']) && str_replace("\r", '', $_POST['agreement']) != $context['agreement'])
 	{
 		checkSession();
+		validateToken('admin-rega');
+
+		$_POST['agreement'] = $smcFunc['normalize']($_POST['agreement']);
 
 		// Off it goes to the agreement file.
-		$fp = fopen($boarddir . '/agreement' . $context['current_agreement'] . '.txt', 'w');
-		fwrite($fp, str_replace("\r", '', $_POST['agreement']));
-		fclose($fp);
+		$to_write = str_replace("\r", '', $_POST['agreement']);
+		$bytes = file_put_contents($boarddir . '/agreement' . $context['current_agreement'] . '.txt', $to_write, LOCK_EX);
 
-		if (!isset($_POST['minor_edit']) || !empty($modSettings['force_gdpr']))
-		{
-			$agreement_settings['agreement_updated_' . $agreement_lang] = time();
+		$agreement_settings['agreement_updated_' . $agreement_lang] = time();
 
-			// Writing it counts as agreeing to it, right?
-			$smcFunc['db_insert']('replace',
-				'{db_prefix}themes',
-				array('id_member' => 'int', 'id_theme' => 'int', 'variable' => 'string', 'value' => 'string'),
-				array($user_info['id'], 1, 'agreement_accepted', time()),
-				array('id_member', 'id_theme', 'variable')
-			);
-			logAction('agreement_updated', array('language' => $context['editable_agreements'][$context['current_agreement']]), 'admin');
-			logAction('agreement_accepted', array('applicator' => $user_info['id']), 'user');
+		if ($bytes == strlen($to_write))
+			$context['saved_successful'] = true;
+		else
+			$context['could_not_save'] = true;
 
-			updateSettings($agreement_settings);
-		}
+		// Writing it counts as agreeing to it, right?
+		$smcFunc['db_insert']('replace',
+			'{db_prefix}themes',
+			array('id_member' => 'int', 'id_theme' => 'int', 'variable' => 'string', 'value' => 'string'),
+			array($user_info['id'], 1, 'agreement_accepted', time()),
+			array('id_member', 'id_theme', 'variable')
+		);
+		logAction('agreement_updated', array('language' => $context['editable_agreements'][$context['current_agreement']]), 'admin');
+		logAction('agreement_accepted', array('applicator' => $user_info['id']), 'user');
+
+		updateSettings($agreement_settings);
 
 		$context['agreement'] = str_replace("\r", '', $_POST['agreement']);
 	}
@@ -258,17 +259,28 @@ function EditAgreement()
 
 	$context['sub_template'] = 'edit_agreement';
 	$context['page_title'] = $txt['registration_agreement'];
+
+	createToken('admin-rega');
 }
 
-// Set reserved names/words....
-function SetReserve()
+/**
+ * Set the names under which users are not allowed to register.
+ * Accessed by ?action=admin;area=regcenter;sa=reservednames.
+ * Requires the admin_forum permission.
+ *
+ * @uses template_edit_reserved_words()
+ */
+function SetReserved()
 {
-	global $txt, $context, $modSettings;
+	global $txt, $context, $modSettings, $smcFunc;
 
 	// Submitting new reserved words.
 	if (!empty($_POST['save_reserved_names']))
 	{
 		checkSession();
+		validateToken('admin-regr');
+
+		$_POST['reserved'] = $smcFunc['normalize']($_POST['reserved']);
 
 		// Set all the options....
 		updateSettings(array(
@@ -278,6 +290,7 @@ function SetReserve()
 			'reserveName' => (isset($_POST['matchname']) ? '1' : '0'),
 			'reserveNames' => str_replace("\r", '', $_POST['reserved'])
 		));
+		$context['saved_successful'] = true;
 	}
 
 	// Get the reserved word options and words.
@@ -292,12 +305,21 @@ function SetReserve()
 	// Ready the template......
 	$context['sub_template'] = 'edit_reserved_words';
 	$context['page_title'] = $txt['admin_reserved_set'];
+	createToken('admin-regr');
 }
 
-// This function handles registration settings, and provides a few pretty stats too while it's at it.
+/**
+ * This function handles registration settings, and provides a few pretty stats too while it's at it.
+ * General registration settings and Coppa compliance settings.
+ * Accessed by ?action=admin;area=regcenter;sa=settings.
+ * Requires the admin_forum permission.
+ *
+ * @param bool $return_config Whether or not to return the config_vars array (used for admin search)
+ * @return void|array Returns nothing or returns the $config_vars array if $return_config is true
+ */
 function ModifyRegistrationSettings($return_config = false)
 {
-	global $txt, $context, $scripturl, $modSettings, $sourcedir;
+	global $txt, $context, $scripturl, $modSettings, $sourcedir, $smcFunc;
 	global $language, $boarddir;
 
 	// This is really quite wanting.
@@ -308,24 +330,22 @@ function ModifyRegistrationSettings($return_config = false)
 	$policy = !empty($modSettings['policy_' . $language]);
 
 	$config_vars = array(
-			array('select', 'registration_method', array($txt['setting_registration_standard'], $txt['setting_registration_activate'], $txt['setting_registration_approval'], $txt['setting_registration_disabled'])),
-			array('check', 'enableOpenID'),
-			array('check', 'notify_new_registration'),
-			array('check', 'send_welcomeEmail'),
-		'',
-			array('check', 'requireAgreement', 'text_label' => $txt['admin_agreement'], 'value' => !empty($modSettings['force_gdpr']) ? 1 : $modSettings['requireAgreement'], 'disabled' => !empty($modSettings['force_gdpr'])),
-			array('warning', empty($agreement) ? 'error_no_agreement' : ''),
-			array('check', 'requirePolicyAgreement', 'text_label' => $txt['admin_privacy_policy'], 'value' => !empty($modSettings['force_gdpr']) ? 1 : $modSettings['requirePolicyAgreement'], 'disabled' => !empty($modSettings['force_gdpr'])),
-			array('warning', empty($policy) ? 'error_no_privacy_policy' : ''),
-		'',
-			array('int', 'coppaAge', 'subtext' => $txt['setting_coppaAge_desc'], 'onchange' => 'checkCoppa();'),
-			array('select', 'coppaType', array($txt['setting_coppaType_reject'], $txt['setting_coppaType_approval']), 'onchange' => 'checkCoppa();'),
-			array('large_text', 'coppaPost', 'subtext' => $txt['setting_coppaPost_desc']),
-			array('text', 'coppaFax'),
-			array('text', 'coppaPhone'),
-		'',
-			array('check', 'announcements_default', 'disabled' => empty($modSettings['allow_disableAnnounce']) || !empty($modSettings['force_gdpr']), 'value' => !empty($modSettings['force_gdpr']) ? 0 : (empty($modSettings['allow_disableAnnounce']) ? 1 : !empty($modSettings['announcements_default']))),
+		array('select', 'registration_method', array($txt['setting_registration_standard'], $txt['setting_registration_activate'], $txt['setting_registration_approval'], $txt['setting_registration_disabled'])),
+		array('check', 'send_welcomeEmail'),
+	'',
+		array('check', 'requireAgreement', 'text_label' => $txt['admin_agreement'], 'value' => !empty($modSettings['requireAgreement'])),
+		array('warning', empty($agreement) ? 'error_no_agreement' : ''),
+		array('check', 'requirePolicyAgreement', 'text_label' => $txt['admin_privacy_policy'], 'value' => !empty($modSettings['requirePolicyAgreement'])),
+		array('warning', empty($policy) ? 'error_no_privacy_policy' : ''),
+	'',
+		array('int', 'coppaAge', 'subtext' => $txt['zero_to_disable'], 'onchange' => 'checkCoppa();'),
+		array('select', 'coppaType', array($txt['setting_coppaType_reject'], $txt['setting_coppaType_approval']), 'onchange' => 'checkCoppa();'),
+		array('large_text', 'coppaPost', 'subtext' => $txt['setting_coppaPost_desc']),
+		array('text', 'coppaFax'),
+		array('text', 'coppaPhone'),
 	);
+
+	call_integration_hook('integrate_modify_registration_settings', array(&$config_vars));
 
 	if ($return_config)
 		return $config_vars;
@@ -343,20 +363,12 @@ function ModifyRegistrationSettings($return_config = false)
 			fatal_lang_error('admin_setting_coppa_require_contact');
 
 		// Post needs to take into account line breaks.
-		$_POST['coppaPost'] = str_replace("\n", '<br />', empty($_POST['coppaPost']) ? '' : $_POST['coppaPost']);
+		$_POST['coppaPost'] = str_replace("\n", '<br>', empty($_POST['coppaPost']) ? '' : $smcFunc['normalize']($_POST['coppaPost']));
 
-		// GDPR requires these settings to have certain values
-		if (!empty($modSettings['force_gdpr']))
-		{
-			$_POST['requireAgreement'] = 1;
-			$_POST['requirePolicyAgreement'] = 1;
-			$_POST['announcements_default'] = 0;
-		}
-		elseif (empty($modSettings['allow_disableAnnounce']))
-			$_POST['announcements_default'] = 1;
+		call_integration_hook('integrate_save_registration_settings');
 
 		saveDBSettings($config_vars);
-
+		$_SESSION['adm-save'] = true;
 		redirectexit('action=admin;area=regcenter;sa=settings');
 	}
 
@@ -388,8 +400,6 @@ function EditPrivacyPolicy()
 {
 	global $txt, $boarddir, $context, $modSettings, $smcFunc, $user_info;
 
-	$context['force_gdpr'] = !empty($modSettings['force_gdpr']);
-
 	// By default, edit the current language's policy
 	$context['current_policy_lang'] = $user_info['language'];
 
@@ -405,11 +415,12 @@ function EditPrivacyPolicy()
 			$context['current_policy_lang'] = $lang['filename'];
 	}
 
-	$context['policy'] = empty($modSettings['policy_' . $context['current_policy_lang']]) ? '' : $modSettings['policy_' . $context['current_policy_lang']];
+	$context['privacy_policy'] = empty($modSettings['policy_' . $context['current_policy_lang']]) ? '' : $modSettings['policy_' . $context['current_policy_lang']];
 
 	if (isset($_POST['policy']))
 	{
 		checkSession();
+		validateToken('admin-regp');
 
 		// Make sure there are no creepy-crawlies in it
 		$policy_text = $smcFunc['htmlspecialchars'](str_replace("\r", '', $_POST['policy']));
@@ -418,30 +429,32 @@ function EditPrivacyPolicy()
 			'policy_' . $context['current_policy_lang'] => $policy_text,
 		);
 
-		if ($policy_text != $context['policy'] && (!isset($_POST['minor_edit']) || !empty($modSettings['force_gdpr'])))
-		{
-			$policy_settings['policy_updated_' . $context['current_policy_lang']] = time();
+		$policy_settings['policy_updated_' . $context['current_policy_lang']] = time();
 
-			// Writing it counts as agreeing to it, right?
-			$smcFunc['db_insert']('replace',
-				'{db_prefix}themes',
-				array('id_member' => 'int', 'id_theme' => 'int', 'variable' => 'string', 'value' => 'string'),
-				array($user_info['id'], 1, 'policy_accepted', time()),
-				array('id_member', 'id_theme', 'variable')
-			);
-			logAction('policy_updated', array('language' => $context['editable_policies'][$context['current_policy_lang']]), 'admin');
-			logAction('policy_accepted', array('applicator' => $user_info['id']), 'user');
-		}
+		// Writing it counts as agreeing to it, right?
+		$smcFunc['db_insert']('replace',
+			'{db_prefix}themes',
+			array('id_member' => 'int', 'id_theme' => 'int', 'variable' => 'string', 'value' => 'string'),
+			array($user_info['id'], 1, 'policy_accepted', time()),
+			array('id_member', 'id_theme', 'variable')
+		);
+		logAction('policy_updated', array('language' => $context['editable_policies'][$context['current_policy_lang']]), 'admin');
+		logAction('policy_accepted', array('applicator' => $user_info['id']), 'user');
+
+		if ($context['privacy_policy'] !== $policy_text)
+			$context['saved_successful'] = true;
 
 		updateSettings($policy_settings);
 
-		$context['policy'] = $policy_text;
+		$context['privacy_policy'] = $policy_text;
 	}
 
-	$context['policy_info'] = sprintf($txt['admin_agreement_info'], empty($modSettings['policy_updated_' . $context['current_policy_lang']]) ? $txt['never'] : timeformat($modSettings['policy_updated_' . $context['current_policy_lang']]));
+	$context['privacy_policy_info'] = sprintf($txt['admin_agreement_info'], empty($modSettings['policy_updated_' . $context['current_policy_lang']]) ? $txt['never'] : timeformat($modSettings['policy_updated_' . $context['current_policy_lang']]));
 
 	$context['sub_template'] = 'edit_privacy_policy';
 	$context['page_title'] = $txt['privacy_policy'];
+
+	createToken('admin-regp');
 }
 
 ?>

@@ -2,7 +2,9 @@
 <theme-info xmlns="http://www.simplemachines.org/xml/theme-info" xmlns:smf="http://www.simplemachines.org/">
 	<!-- For the id, always use something unique - put your name, a colon, and then the package name. -->
 	<id>lf:lemmingsdark</id>
-	<version>2.0.15</version>
+	<version>2.1.4</version>
+  <!-- Install for, the SMF versions this theme was designed for. Uses the same wildcards used in the packager manager. This field is mandatory. -->
+  <install for="2.1 - 2.1.99" />
 	<!-- Theme name, used purely for aesthetics. -->
 	<name>Lemmings Theme (Dark)</name>
 	<!-- Author: your email address or contact information. The name attribute is optional. -->
@@ -14,5 +16,5 @@
 	<!-- Templates to load on startup. Default is "index". -->
 	<templates>index</templates>
 	<!-- Base this theme off another? Default is blank, or no. It could be "default". -->
-	<based-on></based-on>
+	<based-on>default</based-on>
 </theme-info>

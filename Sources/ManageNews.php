@@ -1,69 +1,31 @@
 <?php
 
 /**
+ * This file manages... the news. :P
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.16
+ * @version 2.1.3
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*
-	void ManageNews()
-		- the entrance point for all News and Newsletter screens.
-		- called by ?action=admin;area=news.
-		- does the permission checks.
-		- calls the appropriate function based on the requested sub-action.
-
-	void EditNews()
-		- changes the current news items for the forum.
-		- uses the ManageNews template and edit_news sub template.
-		- called by ?action=admin;area=news.
-		- requires the edit_news permission.
-		- writes an entry into the moderation log.
-		- uses the edit_news administration area.
-		- can be accessed with ?action=admin;sa=editnews.
-
-	void SelectMailingMembers()
-		- allows a user to select the membergroups to send their mailing to.
-		- uses the ManageNews template and email_members sub template.
-		- called by ?action=admin;area=news;sa=mailingmembers.
-		- requires the send_mail permission.
-		- form is submitted to ?action=admin;area=news;mailingcompose.
-
-	void ComposeMailing()
-		- shows a form to edit a forum mailing and its recipients.
-		- uses the ManageNews template and email_members_compose sub template.
-		- called by ?action=admin;area=news;sa=mailingcompose.
-		- requires the send_mail permission.
-		- form is submitted to ?action=admin;area=news;sa=mailingsend.
-
-	void SendMailing(bool clean_only = false)
-		- handles the sending of the forum mailing in batches.
-		- uses the ManageNews template and email_members_send sub template.
-		- called by ?action=admin;area=news;sa=mailingsend
-		- requires the send_mail permission.
-		- redirects to itself when more batches need to be sent.
-		- redirects to ?action=admin after everything has been sent.
-		- if clean_only is set will only clean the variables, put them in context, then return.
-
-	void NewsSettings()
-		- set general news and newsletter settings and permissions.
-		- uses the ManageNews template and news_settings sub template.
-		- called by ?action=admin;area=news;sa=settings.
-		- requires the forum_admin permission.
-*/
-
-// The controller; doesn't do anything, just delegates.
+/**
+ * The news dispatcher; doesn't do anything, just delegates.
+ * This is the entrance point for all News and Newsletter screens.
+ * Called by ?action=admin;area=news.
+ * It does the permission checks, and calls the appropriate function
+ * based on the requested sub-action.
+ */
 function ManageNews()
 {
-	global $context, $txt, $scripturl;
+	global $context, $txt;
 
 	// First, let's do a quick permissions check for the best error message possible.
 	isAllowedTo(array('edit_news', 'send_mail', 'admin_forum'));
@@ -78,12 +40,6 @@ function ManageNews()
 		'mailingsend' => array('SendMailing', 'send_mail'),
 		'settings' => array('ModifyNewsSettings', 'admin_forum'),
 	);
-
-	// Default to sub action 'main' or 'settings' depending on permissions.
-	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (allowedTo('edit_news') ? 'editnews' : (allowedTo('send_mail') ? 'mailingmembers' : 'settings'));
-
-	// Have you got the proper permissions?
-	isAllowedTo($subActions[$_REQUEST['sa']][1]);
 
 	// Create the tabs for the template.
 	$context[$context['admin_menu_name']]['tab_data'] = array(
@@ -102,17 +58,34 @@ function ManageNews()
 		),
 	);
 
+	call_integration_hook('integrate_manage_news', array(&$subActions));
+
+	// Default to sub action 'main' or 'settings' depending on permissions.
+	$_REQUEST['sa'] = isset($_REQUEST['sa']) && isset($subActions[$_REQUEST['sa']]) ? $_REQUEST['sa'] : (allowedTo('edit_news') ? 'editnews' : (allowedTo('send_mail') ? 'mailingmembers' : 'settings'));
+
+	// Have you got the proper permissions?
+	isAllowedTo($subActions[$_REQUEST['sa']][1]);
+
 	// Force the right area...
 	if (substr($_REQUEST['sa'], 0, 7) == 'mailing')
 		$context[$context['admin_menu_name']]['current_subsection'] = 'mailingmembers';
 
-	$subActions[$_REQUEST['sa']][0]();
+	call_helper($subActions[$_REQUEST['sa']][0]);
 }
 
-// Let the administrator(s) edit the news.
+/**
+ * Let the administrator(s) edit the news items for the forum.
+ * It writes an entry into the moderation log.
+ * This function uses the edit_news administration area.
+ * Called by ?action=admin;area=news.
+ * Requires the edit_news permission.
+ * Can be accessed with ?action=admin;sa=editnews.
+ *
+ * Uses a standard list (@see createList())
+ */
 function EditNews()
 {
-	global $txt, $modSettings, $context, $sourcedir, $user_info;
+	global $txt, $modSettings, $context, $sourcedir, $scripturl;
 	global $smcFunc;
 
 	require_once($sourcedir . '/Subs-Post.php');
@@ -132,6 +105,8 @@ function EditNews()
 
 		// Update the database.
 		updateSettings(array('news' => implode("\n", $temp_news)));
+
+		$context['saved_successful'] = true;
 
 		logAction('news');
 	}
@@ -154,25 +129,198 @@ function EditNews()
 		// Send the new news to the database.
 		updateSettings(array('news' => implode("\n", $_POST['news'])));
 
+		$context['saved_successful'] = true;
+
 		// Log this into the moderation log.
 		logAction('news');
 	}
 
+	// We're going to want this for making our list.
+	require_once($sourcedir . '/Subs-List.php');
+
+	$context['page_title'] = $txt['admin_edit_news'];
+
+	// Use the standard templates for showing this.
+	$listOptions = array(
+		'id' => 'news_lists',
+		'get_items' => array(
+			'function' => 'list_getNews',
+		),
+		'columns' => array(
+			'news' => array(
+				'header' => array(
+					'value' => $txt['admin_edit_news'],
+					'class' => 'half_table',
+				),
+				'data' => array(
+					'function' => function($news)
+					{
+						if (is_numeric($news['id']))
+							return '
+								<textarea id="data_' . $news['id'] . '" rows="3" cols="50" name="news[]" class="padding block">' . $news['unparsed'] . '</textarea>
+								<div class="floatleft" id="preview_' . $news['id'] . '"></div>';
+						else
+							return $news['unparsed'];
+					},
+					'class' => 'half_table',
+				),
+			),
+			'preview' => array(
+				'header' => array(
+					'value' => $txt['preview'],
+					'class' => 'half_table',
+				),
+				'data' => array(
+					'function' => function($news)
+					{
+						return '<div id="box_preview_' . $news['id'] . '" style="overflow: auto; width: 100%; height: 10ex;">' . $news['parsed'] . '</div>';
+					},
+					'class' => 'half_table',
+				),
+			),
+			'check' => array(
+				'header' => array(
+					'value' => '<input type="checkbox" onclick="invertAll(this, this.form);">',
+					'class' => 'centercol icon',
+				),
+				'data' => array(
+					'function' => function($news)
+					{
+						if (is_numeric($news['id']))
+							return '<input type="checkbox" name="remove[]" value="' . $news['id'] . '">';
+						else
+							return '';
+					},
+					'class' => 'centercol icon',
+				),
+			),
+		),
+		'form' => array(
+			'href' => $scripturl . '?action=admin;area=news;sa=editnews',
+			'hidden_fields' => array(
+				$context['session_var'] => $context['session_id'],
+			),
+		),
+		'additional_rows' => array(
+			array(
+				'position' => 'bottom_of_list',
+				'value' => '
+				<span id="moreNewsItems_link" class="floatleft" style="display: none;">
+					<a class="button" href="javascript:void(0);" onclick="addNewsItem(); return false;">' . $txt['editnews_clickadd'] . '</a>
+				</span>
+				<input type="submit" name="save_items" value="' . $txt['save'] . '" class="button">
+				<input type="submit" name="delete_selection" value="' . $txt['editnews_remove_selected'] . '" data-confirm="' . $txt['editnews_remove_confirm'] . '" class="button you_sure">',
+			),
+		),
+		'javascript' => '
+					document.getElementById(\'list_news_lists_last\').style.display = "none";
+					document.getElementById("moreNewsItems_link").style.display = "";
+					var last_preview = 0;
+
+					$(document).ready(function () {
+						$("div[id ^= \'preview_\']").each(function () {
+							var preview_id = $(this).attr(\'id\').split(\'_\')[1];
+							if (last_preview < preview_id)
+								last_preview = preview_id;
+							make_preview_btn(preview_id);
+						});
+					});
+
+					function make_preview_btn (preview_id)
+					{
+						$("#preview_" + preview_id).addClass("button");
+						$("#preview_" + preview_id).text(\'' . $txt['preview'] . '\').click(function () {
+							$.ajax({
+								type: "POST",
+								headers: {
+									"X-SMF-AJAX": 1
+								},
+								xhrFields: {
+									withCredentials: typeof allow_xhjr_credentials !== "undefined" ? allow_xhjr_credentials : false
+								},
+								url: "' . $scripturl . '?action=xmlhttp;sa=previews;xml",
+								data: {item: "newspreview", news: $("#data_" + preview_id).val()},
+								context: document.body,
+								success: function(request){
+									if ($(request).find("error").text() == \'\')
+										$(document).find("#box_preview_" + preview_id).html($(request).text());
+									else
+										$(document).find("#box_preview_" + preview_id).text(\'' . $txt['news_error_no_news'] . '\');
+								},
+							});
+						});
+					}
+
+					function addNewsItem ()
+					{
+						last_preview++;
+						$("#list_news_lists_last").before(' . javaScriptEscape('
+						<tr class="windowbg') . ' + (last_preview % 2 == 0 ? \'\' : \'2\') + ' . javaScriptEscape('">
+							<td style="width: 50%;">
+									<textarea id="data_') . ' + last_preview + ' . javaScriptEscape('" rows="3" cols="65" name="news[]" style="width: 95%;"></textarea>
+									<br>
+									<div class="floatleft" id="preview_') . ' + last_preview + ' . javaScriptEscape('"></div>
+							</td>
+							<td style="width: 45%;">
+								<div id="box_preview_') . ' + last_preview + ' . javaScriptEscape('" style="overflow: auto; width: 100%; height: 10ex;"></div>
+							</td>
+							<td></td>
+						</tr>') . ');
+						make_preview_btn(last_preview);
+					}',
+	);
+
+	// Create the request list.
+	createList($listOptions);
+
+	// And go!
+	loadTemplate('ManageNews');
+	$context['sub_template'] = 'news_lists';
+}
+
+/**
+ * Prepares an array of the forum news items for display in the template
+ *
+ * @return array An array of information about the news items
+ */
+function list_getNews()
+{
+	global $modSettings;
+
+	$admin_current_news = array();
 	// Ready the current news.
 	foreach (explode("\n", $modSettings['news']) as $id => $line)
-		$context['admin_current_news'][$id] = array(
+		$admin_current_news[$id] = array(
 			'id' => $id,
 			'unparsed' => un_preparsecode($line),
 			'parsed' => preg_replace('~<([/]?)form[^>]*?[>]*>~i', '<em class="smalltext">&lt;$1form&gt;</em>', parse_bbc($line)),
 		);
 
-	$context['sub_template'] = 'edit_news';
-	$context['page_title'] = $txt['admin_edit_news'];
+	$admin_current_news['last'] = array(
+		'id' => 'last',
+		'unparsed' => '<div id="moreNewsItems"></div>
+		<noscript><textarea rows="3" cols="65" name="news[]" style="width: 85%;"></textarea></noscript>',
+		'parsed' => '<div id="moreNewsItems_preview"></div>',
+	);
+
+	return $admin_current_news;
 }
 
+/**
+ * This function allows a user to select the membergroups to send their
+ * mailing to.
+ * Called by ?action=admin;area=news;sa=mailingmembers.
+ * Requires the send_mail permission.
+ * Form is submitted to ?action=admin;area=news;mailingcompose.
+ *
+ * @uses template_email_members()
+ */
 function SelectMailingMembers()
 {
 	global $txt, $context, $modSettings, $smcFunc;
+
+	// Is there any confirm message?
+	$context['newsletter_sent'] = isset($_SESSION['newsletter_sent']) ? $_SESSION['newsletter_sent'] : '';
 
 	$context['page_title'] = $txt['admin_newsletters'];
 
@@ -284,12 +432,120 @@ function SelectMailingMembers()
 	$smcFunc['db_free_result']($request);
 
 	$context['can_send_pm'] = allowedTo('pm_send');
+
+	loadJavaScriptFile('suggest.js', array('defer' => false, 'minimize' => true), 'smf_suggest');
 }
 
-// Email your members...
+/**
+ * Prepare subject and message of an email for the preview box
+ * Used in ComposeMailing and RetrievePreview (Xml.php)
+ */
+function prepareMailingForPreview()
+{
+	global $context, $modSettings, $scripturl, $user_info, $txt;
+	loadLanguage('Errors');
+
+	$processing = array('preview_subject' => 'subject', 'preview_message' => 'message');
+
+	// Use the default time format.
+	$user_info['time_format'] = $modSettings['time_format'];
+
+	$variables = array(
+		'{$board_url}',
+		'{$current_time}',
+		'{$latest_member.link}',
+		'{$latest_member.id}',
+		'{$latest_member.name}'
+	);
+
+	$html = $context['send_html'];
+
+	// We might need this in a bit
+	$cleanLatestMember = empty($context['send_html']) || $context['send_pm'] ? un_htmlspecialchars($modSettings['latestRealName']) : $modSettings['latestRealName'];
+
+	foreach ($processing as $key => $post)
+	{
+		$context[$key] = !empty($_REQUEST[$post]) ? $_REQUEST[$post] : '';
+
+		if (empty($context[$key]) && empty($_REQUEST['xml']))
+			$context['post_error']['messages'][] = $txt['error_no_' . $post];
+		elseif (!empty($_REQUEST['xml']))
+			continue;
+
+		preparsecode($context[$key]);
+		if ($html)
+		{
+			$enablePostHTML = $modSettings['enablePostHTML'];
+			$modSettings['enablePostHTML'] = $context['send_html'];
+			$context[$key] = parse_bbc($context[$key]);
+			$modSettings['enablePostHTML'] = $enablePostHTML;
+		}
+
+		// Replace in all the standard things.
+		$context[$key] = str_replace($variables,
+			array(
+				!empty($context['send_html']) ? '<a href="' . $scripturl . '">' . $scripturl . '</a>' : $scripturl,
+				timeformat(time(), false),
+				!empty($context['send_html']) ? '<a href="' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . '">' . $cleanLatestMember . '</a>' : ($context['send_pm'] ? '[url=' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . ']' . $cleanLatestMember . '[/url]' : $cleanLatestMember),
+				$modSettings['latestMember'],
+				$cleanLatestMember
+			), $context[$key]);
+	}
+}
+
+/**
+ * Shows a form to edit a forum mailing and its recipients.
+ * Called by ?action=admin;area=news;sa=mailingcompose.
+ * Requires the send_mail permission.
+ * Form is submitted to ?action=admin;area=news;sa=mailingsend.
+ *
+ * @uses template_email_members_compose()
+ */
 function ComposeMailing()
 {
 	global $txt, $sourcedir, $context, $smcFunc;
+
+	// Setup the template!
+	$context['page_title'] = $txt['admin_newsletters'];
+	$context['sub_template'] = 'email_members_compose';
+
+	$context['subject'] = !empty($_POST['subject']) ? $_POST['subject'] : $smcFunc['htmlspecialchars']($context['forum_name'] . ': ' . $txt['subject']);
+	$context['message'] = !empty($_POST['message']) ? $_POST['message'] : $smcFunc['htmlspecialchars']($txt['message'] . "\n\n" . sprintf($txt['regards_team'], $context['forum_name']) . "\n\n" . '{$board_url}');
+
+	// Needed for the WYSIWYG editor.
+	require_once($sourcedir . '/Subs-Editor.php');
+
+	// Now create the editor.
+	$editorOptions = array(
+		'id' => 'message',
+		'value' => $context['message'],
+		'height' => '150px',
+		'width' => '100%',
+		'labels' => array(
+			'post_button' => $txt['sendtopic_send'],
+		),
+		'preview_type' => 2,
+		'required' => true,
+	);
+	create_control_richedit($editorOptions);
+	// Store the ID for old compatibility.
+	$context['post_box_name'] = $editorOptions['id'];
+
+	if (isset($context['preview']))
+	{
+		require_once($sourcedir . '/Subs-Post.php');
+		$context['recipients']['members'] = !empty($_POST['members']) ? explode(',', $_POST['members']) : array();
+		$context['recipients']['exclude_members'] = !empty($_POST['exclude_members']) ? explode(',', $_POST['exclude_members']) : array();
+		$context['recipients']['groups'] = !empty($_POST['groups']) ? explode(',', $_POST['groups']) : array();
+		$context['recipients']['exclude_groups'] = !empty($_POST['exclude_groups']) ? explode(',', $_POST['exclude_groups']) : array();
+		$context['recipients']['emails'] = !empty($_POST['emails']) ? explode(';', $_POST['emails']) : array();
+		$context['email_force'] = !empty($_POST['email_force']) ? 1 : 0;
+		$context['total_emails'] = !empty($_POST['total_emails']) ? (int) $_POST['total_emails'] : 0;
+		$context['send_pm'] = !empty($_POST['send_pm']) ? 1 : 0;
+		$context['send_html'] = !empty($_POST['send_html']) ? '1' : '0';
+
+		return prepareMailingForPreview();
+	}
 
 	// Start by finding any members!
 	$toClean = array();
@@ -381,17 +637,19 @@ function ComposeMailing()
 		$condition_array[] = '{string:email_' . $count . '}';
 		$condition_array_params['email_' . $count++] = $row['email_address'];
 	}
+	$smcFunc['db_free_result']($request);
 
 	if (!empty($condition_array))
 	{
 		$request = $smcFunc['db_query']('', '
 			SELECT id_member
 			FROM {db_prefix}members
-			WHERE email_address IN(' . implode(', ', $condition_array) .')',
+			WHERE email_address IN(' . implode(', ', $condition_array) . ')',
 			$condition_array_params
 		);
 		while ($row = $smcFunc['db_fetch_assoc']($request))
 			$context['recipients']['exclude_members'][] = $row['id_member'];
+		$smcFunc['db_free_result']($request);
 	}
 
 	// Did they select moderators - if so add them as specific members...
@@ -419,34 +677,44 @@ function ComposeMailing()
 	// For progress bar!
 	$context['total_emails'] = count($context['recipients']['emails']);
 	$request = $smcFunc['db_query']('', '
-		SELECT MAX(id_member)
+		SELECT COUNT(*)
 		FROM {db_prefix}members',
 		array(
 		)
 	);
-	list ($context['max_id_member']) = $smcFunc['db_fetch_row']($request);
+	list ($context['total_members']) = $smcFunc['db_fetch_row']($request);
 	$smcFunc['db_free_result']($request);
 
 	// Clean up the arrays.
 	$context['recipients']['members'] = array_unique($context['recipients']['members']);
 	$context['recipients']['exclude_members'] = array_unique($context['recipients']['exclude_members']);
-
-	// Setup the template!
-	$context['page_title'] = $txt['admin_newsletters'];
-	$context['sub_template'] = 'email_members_compose';
-
-	$context['default_subject'] = htmlspecialchars($context['forum_name'] . ': ' . $txt['subject']);
-	$context['default_message'] = htmlspecialchars($txt['message'] . "\n\n" . $txt['regards_team'] . "\n\n" . '{$board_url}');
 }
 
-// Send out the mailing!
+/**
+ * Handles the sending of the forum mailing in batches.
+ * Called by ?action=admin;area=news;sa=mailingsend
+ * Requires the send_mail permission.
+ * Redirects to itself when more batches need to be sent.
+ * Redirects to ?action=admin;area=news;sa=mailingmembers after everything has been sent.
+ * @uses template_email_members_send()
+ *
+ * @param bool $clean_only If set, it will only clean the variables, put them in context, then return.
+ */
 function SendMailing($clean_only = false)
 {
 	global $txt, $sourcedir, $context, $smcFunc;
 	global $scripturl, $modSettings, $user_info;
+	global $webmaster_email;
+
+	if (isset($_POST['preview']))
+	{
+		$context['preview'] = true;
+		return ComposeMailing();
+	}
 
 	// How many to send at once? Quantity depends on whether we are queueing or not.
-	$num_at_once = empty($modSettings['mail_queue']) ? 60 : 1000;
+	// @todo Might need an interface? (used in Post.php too with different limits)
+	$num_at_once = 1000;
 
 	// If by PM's I suggest we half the above number.
 	if (!empty($_POST['send_pm']))
@@ -455,13 +723,29 @@ function SendMailing($clean_only = false)
 	checkSession();
 
 	// Where are we actually to?
-	$context['start'] = isset($_REQUEST['start']) ? $_REQUEST['start'] : 0;
+	$context['start'] = isset($_REQUEST['start']) ? (int) $_REQUEST['start'] : 0;
 	$context['email_force'] = !empty($_POST['email_force']) ? 1 : 0;
 	$context['send_pm'] = !empty($_POST['send_pm']) ? 1 : 0;
 	$context['total_emails'] = !empty($_POST['total_emails']) ? (int) $_POST['total_emails'] : 0;
-	$context['max_id_member'] = !empty($_POST['max_id_member']) ? (int) $_POST['max_id_member'] : 0;
 	$context['send_html'] = !empty($_POST['send_html']) ? '1' : '0';
 	$context['parse_html'] = !empty($_POST['parse_html']) ? '1' : '0';
+
+	//One can't simply nullify things around
+	if (empty($_REQUEST['total_members']))
+	{
+		$request = $smcFunc['db_query']('', '
+			SELECT COUNT(*)
+			FROM {db_prefix}members',
+			array(
+			)
+		);
+		list ($context['total_members']) = $smcFunc['db_fetch_row']($request);
+		$smcFunc['db_free_result']($request);
+	}
+	else
+	{
+		$context['total_members'] = (int) $_REQUEST['total_members'];
+	}
 
 	// Create our main context.
 	$context['recipients'] = array(
@@ -490,7 +774,7 @@ function SendMailing($clean_only = false)
 				$context['recipients']['members'][] = (int) $member;
 	}
 	// Cleaning groups is simple - although deal with both checkbox and commas.
-	if (!empty($_POST['groups']))
+	if (isset($_POST['groups']))
 	{
 		if (is_array($_POST['groups']))
 		{
@@ -505,14 +789,15 @@ function SendMailing($clean_only = false)
 		}
 	}
 	// Same for excluded groups
-	if (!empty($_POST['exclude_groups']))
+	if (isset($_POST['exclude_groups']))
 	{
 		if (is_array($_POST['exclude_groups']))
 		{
 			foreach ($_POST['exclude_groups'] as $group => $dummy)
 				$context['recipients']['exclude_groups'][] = (int) $group;
 		}
-		else
+		// Ignore an empty string - we don't want to exclude "Regular Members" unless it's specifically selected
+		elseif ($_POST['exclude_groups'] != '')
 		{
 			$groups = explode(',', $_POST['exclude_groups']);
 			foreach ($groups as $group)
@@ -520,13 +805,13 @@ function SendMailing($clean_only = false)
 		}
 	}
 	// Finally - emails!
-	if (!empty($_POST['emails']) && empty($modSettings['force_gdpr']))
+	if (!empty($_POST['emails']))
 	{
 		$addressed = array_unique(explode(';', strtr($_POST['emails'], array("\n" => ';', "\r" => ';', ',' => ';'))));
 		foreach ($addressed as $curmem)
 		{
 			$curmem = trim($curmem);
-			if ($curmem != '' && filter_var($curmem, FILTER_VALIDATE_EMAIL) !== false)
+			if ($curmem != '' && filter_var($curmem, FILTER_VALIDATE_EMAIL))
 				$context['recipients']['emails'][$curmem] = $curmem;
 		}
 	}
@@ -537,14 +822,17 @@ function SendMailing($clean_only = false)
 
 	require_once($sourcedir . '/Subs-Post.php');
 
+	// We are relying too much on writing to superglobals...
+	$_POST['subject'] = !empty($_POST['subject']) ? $_POST['subject'] : '';
+	$_POST['message'] = !empty($_POST['message']) ? $_POST['message'] : '';
+
 	// Save the message and its subject in $context
-	$context['subject'] = htmlspecialchars($_POST['subject']);
-	$context['message'] = htmlspecialchars($_POST['message']);
+	$context['subject'] = $smcFunc['htmlspecialchars']($_POST['subject'], ENT_QUOTES);
+	$context['message'] = $smcFunc['htmlspecialchars']($_POST['message'], ENT_QUOTES);
 
 	// Include an unsubscribe link if necessary.
-	if (!$context['send_pm'] && !empty($modSettings['notify_tokens']))
+	if (!$context['send_pm'])
 	{
-		require_once($sourcedir . '/Notify.php');
 		$include_unsubscribe = true;
 		$_POST['message'] .= "\n\n" . '{$member.unsubscribe}';
 	}
@@ -554,7 +842,7 @@ function SendMailing($clean_only = false)
 	{
 		// Prepare the message for HTML.
 		if (!empty($_POST['parse_html']))
-			$_POST['message'] = str_replace(array("\n", '  '), array('<br />' . "\n", '&nbsp; '), $_POST['message']);
+			$_POST['message'] = str_replace(array("\n", '  '), array('<br>' . "\n", '&nbsp; '), $_POST['message']);
 
 		// This is here to prevent spam filters from tagging this as spam.
 		if (preg_match('~\<html~i', $_POST['message']) == 0)
@@ -564,6 +852,12 @@ function SendMailing($clean_only = false)
 			else
 				$_POST['message'] = '<html>' . $_POST['message'] . '</html>';
 		}
+	}
+
+	if (empty($_POST['message']) || empty($_POST['subject']))
+	{
+		$context['preview'] = true;
+		return ComposeMailing();
 	}
 
 	// Use the default time format.
@@ -584,15 +878,15 @@ function SendMailing($clean_only = false)
 	$_POST['message'] = str_replace($variables,
 		array(
 			!empty($_POST['send_html']) ? '<a href="' . $scripturl . '">' . $scripturl . '</a>' : $scripturl,
-			timeformat(forum_time(), false),
-			!empty($_POST['send_html']) ? '<a href="' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . '">' . $cleanLatestMember . '</a>' : ($context['send_pm'] ? '[url=' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . ']' . $cleanLatestMember . '[/url]' : $cleanLatestMember),
+			timeformat(time(), false),
+			!empty($_POST['send_html']) ? '<a href="' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . '">' . $cleanLatestMember . '</a>' : ($context['send_pm'] ? '[url=' . $scripturl . '?action=profile;u=' . $modSettings['latestMember'] . ']' . $cleanLatestMember . '[/url]' : $scripturl . '?action=profile;u=' . $modSettings['latestMember']),
 			$modSettings['latestMember'],
 			$cleanLatestMember
 		), $_POST['message']);
 	$_POST['subject'] = str_replace($variables,
 		array(
 			$scripturl,
-			timeformat(forum_time(), false),
+			timeformat(time(), false),
 			$modSettings['latestRealName'],
 			$modSettings['latestMember'],
 			$modSettings['latestRealName']
@@ -621,8 +915,8 @@ function SendMailing($clean_only = false)
 		if ($context['send_pm'])
 			continue;
 
-		// Non-members can't subscribe or unsubscribe from anything...
-		$unsubscribe_link = '';
+		// Non-members can't unsubscribe via the automated system.
+		$unsubscribe_link = sprintf($txt['unsubscribe_announcements_manual'], empty($modSettings['mail_from']) ? $webmaster_email : $modSettings['mail_from']);
 
 		$to_member = array(
 			$email,
@@ -632,14 +926,12 @@ function SendMailing($clean_only = false)
 			$unsubscribe_link,
 		);
 
-		sendmail($email, str_replace($from_member, $to_member, $_POST['subject']), str_replace($from_member, $to_member, $_POST['message']), null, null, !empty($_POST['send_html']), 5);
+		sendmail($email, str_replace($from_member, $to_member, $_POST['subject']), str_replace($from_member, $to_member, $_POST['message']), null, 'news', !empty($_POST['send_html']), 5);
 
 		// Done another...
 		$i++;
 	}
 
-	// Got some more to send this batch?
-	$last_id_member = 0;
 	if ($i < $num_at_once)
 	{
 		// Need to build quite a query!
@@ -660,7 +952,7 @@ function SendMailing($clean_only = false)
 				}
 			}
 			if (!empty($queryBuild))
-			$sendQuery .= implode(' OR ', $queryBuild);
+				$sendQuery .= implode(' OR ', $queryBuild);
 		}
 		if (!empty($context['recipients']['members']))
 		{
@@ -672,7 +964,11 @@ function SendMailing($clean_only = false)
 
 		// If we've not got a query then we must be done!
 		if ($sendQuery == '()')
-			redirectexit('action=admin');
+		{
+			// Set a confirmation message.
+			$_SESSION['newsletter_sent'] = 'queue_done';
+			redirectexit('action=admin;area=news;sa=mailingmembers');
+		}
 
 		// Anything to exclude?
 		if (!empty($context['recipients']['exclude_groups']) && in_array(0, $context['recipients']['exclude_groups']))
@@ -683,33 +979,37 @@ function SendMailing($clean_only = false)
 			$sendParams['exclude_members'] = $context['recipients']['exclude_members'];
 		}
 
-		// Force them to have it?
-		if (empty($context['email_force']) || !empty($modSettings['force_gdpr']))
-			$sendQuery .= ' AND mem.notify_announcements = {int:notify_announcements}';
-
 		// Get the smelly people - note we respect the id_member range as it gives us a quicker query.
 		$result = $smcFunc['db_query']('', '
 			SELECT mem.id_member, mem.email_address, mem.real_name, mem.id_group, mem.additional_groups, mem.id_post_group
 			FROM {db_prefix}members AS mem
-			WHERE mem.id_member > {int:min_id_member}
-				AND mem.id_member < {int:max_id_member}
-				AND ' . $sendQuery . '
+			WHERE ' . $sendQuery . '
 				AND mem.is_activated = {int:is_activated}
 			ORDER BY mem.id_member ASC
-			LIMIT {int:atonce}',
+			LIMIT {int:start}, {int:atonce}',
 			array_merge($sendParams, array(
-				'min_id_member' => $context['start'],
-				'max_id_member' => $context['start'] + $num_at_once - $i,
-				'atonce' => $num_at_once - $i,
+				'start' => $context['start'],
+				'atonce' => $num_at_once,
 				'regular_group' => 0,
-				'notify_announcements' => 1,
 				'is_activated' => 1,
 			))
 		);
-
+		$rows = array();
 		while ($row = $smcFunc['db_fetch_assoc']($result))
 		{
-			$last_id_member = $row['id_member'];
+			$rows[$row['id_member']] = $row;
+		}
+		$smcFunc['db_free_result']($result);
+
+		// Load their alert preferences
+		require_once($sourcedir . '/Subs-Notify.php');
+		$prefs = getNotifyPrefs(array_keys($rows), 'announcements', true);
+
+		foreach ($rows as $row)
+		{
+			// Force them to have it?
+			if (empty($context['email_force']) && empty($prefs[$row['id_member']]['announcements']))
+				continue;
 
 			// What groups are we looking at here?
 			if (empty($row['additional_groups']))
@@ -739,7 +1039,7 @@ function SendMailing($clean_only = false)
 			$message = str_replace($from_member,
 				array(
 					$row['email_address'],
-					!empty($_POST['send_html']) ? '<a href="' . $scripturl . '?action=profile;u=' . $row['id_member'] . '">' . $cleanMemberName . '</a>' : ($context['send_pm'] ? '[url=' . $scripturl . '?action=profile;u=' . $row['id_member'] . ']' . $cleanMemberName . '[/url]' : $cleanMemberName),
+					!empty($_POST['send_html']) ? '<a href="' . $scripturl . '?action=profile;u=' . $row['id_member'] . '">' . $cleanMemberName . '</a>' : ($context['send_pm'] ? '[url=' . $scripturl . '?action=profile;u=' . $row['id_member'] . ']' . $cleanMemberName . '[/url]' : $scripturl . '?action=profile;u=' . $row['id_member']),
 					$row['id_member'],
 					$cleanMemberName,
 					$unsubscribe_link,
@@ -755,53 +1055,57 @@ function SendMailing($clean_only = false)
 
 			// Send the actual email - or a PM!
 			if (!$context['send_pm'])
-				sendmail($row['email_address'], $subject, $message, null, null, !empty($_POST['send_html']), 5);
+				sendmail($row['email_address'], $subject, $message, null, 'news', !empty($_POST['send_html']), 5);
 			else
 				sendpm(array('to' => array($row['id_member']), 'bcc' => array()), $subject, $message);
 		}
-		$smcFunc['db_free_result']($result);
 	}
 
-	// If used our batch assume we still have a member.
-	if ($i >= $num_at_once)
-		$last_id_member = $context['start'];
-	// Or we didn't have one in range?
-	elseif (empty($last_id_member) && $context['start'] + $num_at_once < $context['max_id_member'])
-		$last_id_member = $context['start'] + $num_at_once;
-	// If we have no id_member then we're done.
-	elseif (empty($last_id_member) && empty($context['recipients']['emails']))
+	$context['start'] = $context['start'] + $num_at_once;
+	if (empty($context['recipients']['emails']) && ($context['start'] >= $context['total_members']))
 	{
 		// Log this into the admin log.
 		logAction('newsletter', array(), 'admin');
-
-		redirectexit('action=admin');
+		$_SESSION['newsletter_sent'] = 'queue_done';
+		redirectexit('action=admin;area=news;sa=mailingmembers');
 	}
 
-	$context['start'] = $last_id_member;
-
 	// Working out progress is a black art of sorts.
-	$percentEmails = $context['total_emails'] == 0 ? 0 : ((count($context['recipients']['emails']) / $context['total_emails']) * ($context['total_emails'] / ($context['total_emails'] + $context['max_id_member'])));
-	$percentMembers = ($context['start'] / $context['max_id_member']) * ($context['max_id_member'] / ($context['total_emails'] + $context['max_id_member']));
+	$percentEmails = $context['total_emails'] == 0 ? 0 : ((count($context['recipients']['emails']) / $context['total_emails']) * ($context['total_emails'] / ($context['total_emails'] + $context['total_members'])));
+	$percentMembers = ($context['start'] / $context['total_members']) * ($context['total_members'] / ($context['total_emails'] + $context['total_members']));
 	$context['percentage_done'] = round(($percentEmails + $percentMembers) * 100, 2);
 
 	$context['page_title'] = $txt['admin_newsletters'];
 	$context['sub_template'] = 'email_members_send';
 }
 
+/**
+ * Set general news and newsletter settings and permissions.
+ * Called by ?action=admin;area=news;sa=settings.
+ * Requires the forum_admin permission.
+ * @uses template_show_settings()
+ *
+ * @param bool $return_config Whether or not to return the config_vars array (used for admin search)
+ * @return void|array Returns nothing or returns the config_vars array if $return_config is true
+ */
 function ModifyNewsSettings($return_config = false)
 {
-	global $context, $sourcedir, $modSettings, $txt, $scripturl;
+	global $context, $sourcedir, $txt, $scripturl;
 
 	$config_vars = array(
 		array('title', 'settings'),
-			// Inline permissions.
-			array('permissions', 'edit_news', 'help' => ''),
-			array('permissions', 'send_mail'),
+		// Inline permissions.
+		array('permissions', 'edit_news', 'help' => ''),
+		array('permissions', 'send_mail'),
 		'',
-			// Just the remaining settings.
-			array('check', 'xmlnews_enable', 'onclick' => 'document.getElementById(\'xmlnews_maxlen\').disabled = !this.checked;'),
-			array('text', 'xmlnews_maxlen', 10),
+
+		// Just the remaining settings.
+		array('check', 'xmlnews_enable', 'onclick' => 'document.getElementById(\'xmlnews_maxlen\').disabled = !this.checked;'),
+		array('int', 'xmlnews_maxlen', 'subtext' => $txt['xmlnews_maxlen_note'], 10),
+		array('check', 'xmlnews_attachments', 'subtext' => $txt['xmlnews_attachments_note']),
 	);
+
+	call_integration_hook('integrate_modify_news_settings', array(&$config_vars));
 
 	if ($return_config)
 		return $config_vars;
@@ -809,28 +1113,30 @@ function ModifyNewsSettings($return_config = false)
 	$context['page_title'] = $txt['admin_edit_news'] . ' - ' . $txt['settings'];
 	$context['sub_template'] = 'show_settings';
 
-	// Needed for the inline permission functions, and the settings template.
-	require_once($sourcedir . '/ManagePermissions.php');
+	// Needed for the settings template.
 	require_once($sourcedir . '/ManageServer.php');
 
 	// Wrap it all up nice and warm...
 	$context['post_url'] = $scripturl . '?action=admin;area=news;save;sa=settings';
-	$context['permissions_excluded'] = array(-1);
 
 	// Add some javascript at the bottom...
-	$context['settings_insert_below'] = '
-		<script type="text/javascript"><!-- // --><![CDATA[
-			document.getElementById("xmlnews_maxlen").disabled = !document.getElementById("xmlnews_enable").checked;
-		// ]]></script>';
+	addInlineJavaScript('
+	document.getElementById("xmlnews_maxlen").disabled = !document.getElementById("xmlnews_enable").checked;', true);
 
 	// Saving the settings?
 	if (isset($_GET['save']))
 	{
 		checkSession();
 
+		call_integration_hook('integrate_save_news_settings');
+
 		saveDBSettings($config_vars);
+		$_SESSION['adm-save'] = true;
 		redirectexit('action=admin;area=news;sa=settings');
 	}
+
+	// We need this for the in-line permissions
+	createToken('admin-mp');
 
 	prepareDBSettingContext($config_vars);
 }

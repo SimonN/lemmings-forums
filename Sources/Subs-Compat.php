@@ -1,92 +1,30 @@
 <?php
 
 /**
+ * This file provides compatibility functions and code for older versions of
+ * PHP, such as the sha1() function, missing extensions, or 64-bit vs 32-bit
+ * systems. It is only included for those older versions or when the respective
+ * extension or function cannot be found.
+ *
  * Simple Machines Forum (SMF)
  *
  * @package SMF
- * @author Simple Machines http://www.simplemachines.org
- * @copyright 2011 Simple Machines
- * @license http://www.simplemachines.org/about/smf/license.php BSD
+ * @author Simple Machines https://www.simplemachines.org
+ * @copyright 2022 Simple Machines and individual contributors
+ * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.0.18
+ * @version 2.1.3
  */
 
 if (!defined('SMF'))
-	die('Hacking attempt...');
+	die('No direct access...');
 
-/*	This file provides compatibility functions and code for older versions of
-	PHP, such as the sha1() function.  It is only included for those older
-	versions.
-*/
-
-if (!function_exists('stripos'))
-{
-	function stripos($haystack, $needle, $offset = 0)
-	{
-		return strpos(strtolower($haystack), strtolower($needle), $offset);
-	}
-}
-
-if (!function_exists('md5_file'))
-{
-	function md5_file($filename)
-	{
-		// This isn't the most efficient way in the world, but then we don't have MD5_CTX do we?
-		return md5(file_get_contents($filename));
-	}
-}
-
-// Split a string into an array.
-if (!function_exists('str_split'))
-{
-	function str_split($str, $str_length = 1)
-	{
-		if ($str_length < 1)
-			return false;
-
-		// This could be shorter but isn't because short solutions can fail!
-		$str_array = array();
-		$count = 0;
-
-		while (1 == 1)
-		{
-			if ($count >= strlen($str))
-				break;
-
-			$str_array[] = substr($str, $count, $str_length);
-			$count += $str_length;
-		}
-
-		return $str_array;
-	}
-}
-
-if (!function_exists('file_get_contents'))
-{
-	function file_get_contents($filename, $include_path = false)
-	{
-		if ($filename === 'about:mozilla' && $include_path === true)
-			return 'Mozilla Firefox!';
-
-		$fp = fopen($filename, 'rb', $include_path);
-		if ($fp == false)
-			return false;
-
-		if (is_file($filename))
-			$data = fread($fp, filesize($filename));
-		else
-		{
-			$data = '';
-			while (!feof($fp))
-				$data .= fread($fp, 8192);
-		}
-		fclose($fp);
-
-		return $data;
-	}
-}
-
-// Define the old SMF sha1 function.
+/**
+ * Define the old SMF sha1 function. Uses mhash if available
+ *
+ * @param string $str The string
+ * @return string The sha1 hashed version of $str
+ */
 function sha1_smf($str)
 {
 	// If we have mhash loaded in, use it instead!
@@ -104,7 +42,13 @@ function sha1_smf($str)
 	return sha1_core($blks, strlen($str) * 8);
 }
 
-// This is the core SHA-1 calculation routine, used by sha1().
+/**
+ * This is the core SHA-1 calculation routine, used by sha1().
+ *
+ * @param string $x
+ * @param int $len
+ * @return string
+ */
 function sha1_core($x, $len)
 {
 	@$x[$len >> 5] |= 0x80 << (24 - $len % 32);
@@ -150,6 +94,15 @@ function sha1_core($x, $len)
 	return sprintf('%08x%08x%08x%08x%08x', $a, $b, $c, $d, $e);
 }
 
+/**
+ * Helper function for the core SHA-1 calculation
+ *
+ * @param int $t
+ * @param int $b
+ * @param int $c
+ * @param int $d
+ * @return int
+ */
 function sha1_ft($t, $b, $c, $d)
 {
 	if ($t < 20)
@@ -162,11 +115,24 @@ function sha1_ft($t, $b, $c, $d)
 	return $b ^ $c ^ $d;
 }
 
+/**
+ * Helper function for the core SHA-1 calculation
+ *
+ * @param int $t
+ * @return int 1518500249, 1859775393, -1894007588 or -899497514 depending on the value of $t
+ */
 function sha1_kt($t)
 {
 	return $t < 20 ? 1518500249 : ($t < 40 ? 1859775393 : ($t < 60 ? -1894007588 : -899497514));
 }
 
+/**
+ * Helper function for the core SHA-1 calculation
+ *
+ * @param int $num
+ * @param int $cnt
+ * @return int
+ */
 function sha1_rol($num, $cnt)
 {
 	// Unfortunately, PHP uses unsigned 32-bit longs only.  So we have to kludge it a bit.
@@ -178,66 +144,420 @@ function sha1_rol($num, $cnt)
 	return ($num << $cnt) | $a;
 }
 
-// Still on old PHP - bad boy! (the built in one would be faster.)
-if (!function_exists('sha1'))
+/**
+ * Available since: (PHP 5)
+ * If the optional raw_output is set to TRUE, then the sha1 digest is instead returned in raw binary format with a length of 20,
+ * otherwise the returned value is a 40-character hexadecimal number.
+ *
+ * @param string $text The text to hash
+ * @return string The sha1 hash of $text
+ */
+function sha1_raw($text)
 {
-	function sha1($str)
+	return sha1($text, true);
+}
+
+if (!function_exists('smf_crc32'))
+{
+	/**
+	 * Compatibility function.
+	 * crc32 doesn't work as expected on 64-bit functions - make our own.
+	 * https://php.net/crc32#79567
+	 *
+	 * @param string $number
+	 * @return string The crc32 polynomial of $number
+	 */
+	function smf_crc32($number)
 	{
-		return sha1_smf($str);
+		$crc = crc32($number);
+
+		if ($crc & 0x80000000)
+		{
+			$crc ^= 0xffffffff;
+			$crc += 1;
+			$crc = -$crc;
+		}
+
+		return $crc;
 	}
 }
 
-if (!function_exists('array_combine'))
+if (!function_exists('mb_ord'))
 {
-	function array_combine($keys, $values)
+	/**
+	 * Compatibility function.
+	 *
+	 * This is a complete polyfill.
+	 *
+	 * @param string $string A character.
+	 * @param string|null $encoding The character encoding.
+	 *     If null, the current SMF encoding will be used, falling back to UTF-8.
+	 * @return int|bool The Unicode code point of the character, or false on failure.
+	 */
+	function mb_ord($string, $encoding = null)
 	{
-		$ret = array();
-		if (($array_error = !is_array($keys) || !is_array($values)) || empty($values) || ($count=count($keys)) != count($values))
-		{
-			trigger_error('array_combine(): Both parameters should be non-empty arrays with an equal number of elements', E_USER_WARNING);
-
-			if ($array_error)
-				return;
+		// Must have a supported encoding.
+		if (($encoding = mb_ord_chr_encoding($encoding)) === false)
 			return false;
-		}
 
-		// Ensure that both arrays aren't associative arrays.
-		$keys = array_values($keys);
-		$values = array_values($values);
-
-		for ($i=0; $i < $count; $i++)
-			$ret[$keys[$i]] = $values[$i];
-
-		return $ret;
-	}
-}
-
-if (!function_exists('array_diff_key'))
-{
-	function array_diff_key()
-	{
-		$arrays = func_get_args();
-		$result = array_shift($arrays);
-		foreach ($arrays as $array)
+		/* Alternative approach for certain encodings.
+		 *
+		 * This is required because there are some invalid byte sequences in
+		 * these encodings for which native mb_ord() will return false, yet
+		 * mb_convert_encoding() and iconv() will nevertheless convert into
+		 * technically valid but semantically unrelated UTF-8 byte sequences.
+		 *
+		 * For these encodings, mb_encode_numericentity() always produces
+		 * either an entity with the same number that mb_ord() would produce,
+		 * or else malformed output for byte sequences where mb_ord() would
+		 * return false. This allows us to use mb_encode_numericentity() as a
+		 * (slow) alternative method for these encodings.
+		 *
+		 * Note: we cannot use mb_check_encoding() here, because it returns
+		 * false for ALL invalid byte sequences, but mb_ord() only returns false
+		 * for SOME invalid byte sequences.
+		 */
+		if (in_array($encoding, array('EUC-CN', 'EUC-KR', 'ISO-2022-KR')))
 		{
-			foreach ($result as $key => $v)
-			{
-				if (array_key_exists($key, $array))
-				{
-					unset($result[$key]);
-				}
-			}
+			if (!function_exists('mb_encode_numericentity'))
+				return false;
+
+			$entity = mb_encode_numericentity($string, array(0x0,0x10FFFF,0x0,0xFFFFFF), $encoding);
+
+			if (strpos($entity, '&#') !== 0)
+				return false;
+
+			return (int) trim($entity, '&#;');
 		}
-		return $result;
+
+		// Convert to UTF-8. Return false on failure.
+		if ($encoding !== 'UTF-8')
+		{
+			$temp = false;
+
+			if (function_exists('mb_convert_encoding'))
+			{
+				$mb_substitute_character = mb_substitute_character();
+				mb_substitute_character('none');
+
+				$temp = mb_convert_encoding($string, 'UTF-8', $encoding);
+
+				mb_substitute_character($mb_substitute_character);
+			}
+
+			if ($temp === false && function_exists('iconv'))
+				$temp = iconv($encoding, 'UTF-8', $string);
+
+			if ($temp === false)
+				return false;
+
+			$string = $temp;
+		}
+
+		if (strlen($string) === 1)
+			return ord($string);
+
+		// Get the values of the individual bytes.
+		$unpacked = unpack('C*', substr($string, 0, 4));
+
+		if ($unpacked === false)
+		{
+			$ord = 0;
+		}
+		elseif ($unpacked[1] >= 0xF0)
+		{
+			$ord = ($unpacked[1] - 0xF0) << 18;
+			$ord += ($unpacked[2] - 0x80) << 12;
+			$ord += ($unpacked[3] - 0x80) << 6;
+			$ord += $unpacked[4] - 0x80;
+		}
+		elseif ($unpacked[1] >= 0xE0)
+		{
+			$ord = ($unpacked[1] - 0xE0) << 12;
+			$ord += ($unpacked[2] - 0x80) << 6;
+			$ord += $unpacked[3] - 0x80;
+		}
+		elseif ($unpacked[1] >= 0xC0)
+		{
+			$ord = ($unpacked[1] - 0xC0) << 6;
+			$ord += $unpacked[2] - 0x80;
+		}
+		else
+		{
+			$ord = $unpacked[1];
+		}
+
+		// Surrogate pairs are invalid in UTF-8.
+		if ($ord >= 0xD800 && $ord <= 0xDFFF)
+			$ord = 0;
+
+		return $ord;
 	}
 }
 
-if (!function_exists('mysql_real_escape_string'))
+if (!function_exists('mb_chr'))
 {
-	function mysql_real_escape_string($string, $connection = null)
+	/**
+	 * Compatibility function.
+	 *
+	 * This is a complete polyfill.
+	 *
+	 * @param int $codepoint A Unicode codepoint value.
+	 * @param string|null $encoding The character encoding.
+	 *     If null, the current SMF encoding will be used, falling back to UTF-8.
+	 * @return string|bool The requested character, or false on failure.
+	 */
+	function mb_chr($codepoint, $encoding = null)
 	{
-		return mysql_escape_string($string);
+		// Must have a supported encoding.
+		if (($encoding = mb_ord_chr_encoding($encoding)) === false)
+			return false;
+
+		// 0x10FFFF is the highest defined code point as of Unicode 13.0.0
+		$codepoint %= 0x110000;
+
+		if ($codepoint < 0x80)
+		{
+			$string = chr($codepoint);
+		}
+		elseif ($codepoint < 0x800)
+		{
+			$string = chr(0xC0 | $codepoint >> 6) . chr(0x80 | $codepoint & 0x3F);
+		}
+		elseif ($codepoint < 0x10000)
+		{
+			$string = chr(0xE0 | $codepoint >> 12) . chr(0x80 | $codepoint >> 6 & 0x3F) . chr(0x80 | $codepoint & 0x3F);
+		}
+		else
+		{
+			$string = chr(0xF0 | $codepoint >> 18) . chr(0x80 | $codepoint >> 12 & 0x3F) . chr(0x80 | $codepoint >> 6 & 0x3F) . chr(0x80 | $codepoint & 0x3F);
+		}
+
+		// Return in the requested encoding, or false on failure.
+		// Note: native mb_chr() always returns a character in regular UTF-8
+		// when the encoding is set to one of the UTF-8-Mobile* encodings. If
+		// that behaviour changes in the future, add version checks here.
+		if (strpos($encoding, 'UTF-8') !== 0)
+		{
+			$temp = false;
+
+			if (function_exists('mb_convert_encoding'))
+			{
+				$mb_substitute_character = mb_substitute_character();
+				mb_substitute_character('none');
+
+				$temp = mb_convert_encoding($string, $encoding, 'UTF-8');
+
+				mb_substitute_character($mb_substitute_character);
+			}
+
+			if ($temp === false && function_exists('iconv'))
+				$temp = iconv('UTF-8', $encoding, $string);
+
+			if ($temp === false)
+				return false;
+
+			$string = $temp;
+		}
+
+		return $string;
 	}
+}
+
+/**
+ * Helper function for the mb_ord and mb_chr polyfills.
+ *
+ * Checks whether $encoding is a supported character encoding for the mb_ord
+ * and mb_chr functions. If $encoding is null, the current default character
+ * encoding is used. If the encoding is supported, it is returned as a string.
+ * If not, false is returned.
+ *
+ * @param string $encoding A character encoding to check, or null for default.
+ * @return string|bool The character encoding, or false if unsupported.
+ */
+function mb_ord_chr_encoding($encoding = null)
+{
+	global $modSettings, $txt;
+
+	if (is_null($encoding))
+	{
+		if (isset($modSettings['global_character_set']))
+			$encoding = $modSettings['global_character_set'];
+
+		elseif (isset($txt['lang_character_set']))
+			$encoding = $txt['lang_character_set'];
+
+		elseif (function_exists('mb_internal_encoding'))
+			$encoding = mb_internal_encoding();
+
+		elseif (ini_get('default_charset') != false)
+			$encoding = ini_get('default_charset');
+
+		else
+			$encoding = 'UTF-8';
+	}
+
+	// Only some mb_string encodings are supported by mb_chr() and mb_ord().
+	$supported_encodings = array(
+		'8bit', 'UCS-4', 'UCS-4BE', 'UCS-4LE', 'UCS-2', 'UCS-2BE', 'UCS-2LE',
+		'UTF-32', 'UTF-32BE', 'UTF-32LE', 'UTF-16', 'UTF-16BE', 'UTF-16LE',
+		'UTF-8', 'ASCII', 'EUC-JP', 'SJIS', 'eucJP-win', 'EUC-JP-2004',
+		'SJIS-win', 'SJIS-Mobile#DOCOMO', 'SJIS-Mobile#KDDI',
+		'SJIS-Mobile#SOFTBANK', 'SJIS-mac', 'SJIS-2004', 'UTF-8-Mobile#DOCOMO',
+		'UTF-8-Mobile#KDDI-A', 'UTF-8-Mobile#KDDI-B', 'UTF-8-Mobile#SOFTBANK',
+		'CP932', 'CP51932', 'GB18030', 'Windows-1252', 'Windows-1254',
+		'ISO-8859-1', 'ISO-8859-2', 'ISO-8859-3', 'ISO-8859-4', 'ISO-8859-5',
+		'ISO-8859-6', 'ISO-8859-7', 'ISO-8859-8', 'ISO-8859-9', 'ISO-8859-10',
+		'ISO-8859-13', 'ISO-8859-14', 'ISO-8859-15', 'ISO-8859-16', 'EUC-CN',
+		'CP936', 'HZ', 'EUC-TW', 'BIG-5', 'CP950', 'EUC-KR', 'UHC',
+		'ISO-2022-KR', 'Windows-1251', 'CP866', 'KOI8-R', 'KOI8-U', 'ArmSCII-8',
+		'CP850', 'JIS-ms',
+	);
+
+	// Found it.
+	if (in_array($encoding, $supported_encodings))
+		return $encoding;
+
+	// Gracefully handle aliases and incorrect lettercase.
+	$encoding_l = strtolower($encoding);
+	foreach ($supported_encodings as $possible_encoding)
+	{
+		$aliases = array_merge(array($possible_encoding), mb_encoding_aliases($possible_encoding));
+
+		foreach ($aliases as $alias)
+		{
+			if (strtolower($alias) === $encoding_l)
+				return $possible_encoding;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * IDNA_* constants used as flags for the idn_to_* functions.
+ */
+foreach (
+	array(
+		'IDNA_DEFAULT' => 0,
+		'IDNA_ALLOW_UNASSIGNED' => 1,
+		'IDNA_USE_STD3_RULES' => 2,
+		'IDNA_CHECK_BIDI' => 4,
+		'IDNA_CHECK_CONTEXTJ' => 8,
+		'IDNA_NONTRANSITIONAL_TO_ASCII' => 16,
+		'IDNA_NONTRANSITIONAL_TO_UNICODE' => 32,
+		'INTL_IDNA_VARIANT_2003' => 0,
+		'INTL_IDNA_VARIANT_UTS46' => 1,
+	)
+	as $name => $value
+)
+{
+	if (!defined($name))
+		define($name, $value);
+};
+
+if (!function_exists('idn_to_ascii'))
+{
+	/**
+	 * Compatibility function.
+	 *
+	 * This is not a complete polyfill:
+	 *
+	 *  - $flags only supports IDNA_DEFAULT, IDNA_NONTRANSITIONAL_TO_ASCII,
+	 *    and IDNA_USE_STD3_RULES.
+	 *  - $variant is ignored, because INTL_IDNA_VARIANT_UTS46 is always used.
+	 *  - $idna_info is ignored.
+	 *
+	 * @param string $domain The domain to convert, which must be UTF-8 encoded.
+	 * @param int $flags A subset of possible IDNA_* flags.
+	 * @param int $variant Ignored in this compatibility function.
+	 * @param array|null $idna_info Ignored in this compatibility function.
+	 * @return string|bool The domain name encoded in ASCII-compatible form, or false on failure.
+	 */
+	function idn_to_ascii($domain, $flags = 0, $variant = 1, &$idna_info = null)
+	{
+		global $sourcedir;
+
+		static $Punycode;
+
+		require_once($sourcedir . '/Class-Punycode.php');
+
+		if (!is_object($Punycode))
+			$Punycode = new Punycode();
+
+		if (method_exists($Punycode, 'useStd3'))
+			$Punycode->useStd3($flags === ($flags | IDNA_USE_STD3_RULES));
+		if (method_exists($Punycode, 'useNonTransitional'))
+			$Punycode->useNonTransitional($flags === ($flags | IDNA_NONTRANSITIONAL_TO_ASCII));
+
+		return $Punycode->encode($domain);
+	}
+}
+
+if (!function_exists('idn_to_utf8'))
+{
+	/**
+	 * Compatibility function.
+	 *
+	 * This is not a complete polyfill:
+	 *
+	 *  - $flags only supports IDNA_DEFAULT, IDNA_NONTRANSITIONAL_TO_UNICODE,
+	 *    and IDNA_USE_STD3_RULES.
+	 *  - $variant is ignored, because INTL_IDNA_VARIANT_UTS46 is always used.
+	 *  - $idna_info is ignored.
+	 *
+	 * @param string $domain Domain to convert, in an IDNA ASCII-compatible format.
+	 * @param int $flags Ignored in this compatibility function.
+	 * @param int $variant Ignored in this compatibility function.
+	 * @param array|null $idna_info Ignored in this compatibility function.
+	 * @return string|bool The domain name in Unicode, encoded in UTF-8, or false on failure.
+	 */
+	function idn_to_utf8($domain, $flags = 0, $variant = 1, &$idna_info = null)
+	{
+		global $sourcedir;
+
+		static $Punycode;
+
+		require_once($sourcedir . '/Class-Punycode.php');
+
+		if (!is_object($Punycode))
+			$Punycode = new Punycode();
+
+		$Punycode->useStd3($flags === ($flags | IDNA_USE_STD3_RULES));
+		$Punycode->useNonTransitional($flags === ($flags | IDNA_NONTRANSITIONAL_TO_UNICODE));
+
+		return $Punycode->decode($domain);
+	}
+}
+
+/**
+ * Prevent fatal errors under PHP 8 when a disabled internal function is called.
+ *
+ * Before PHP 8, calling a disabled internal function merely generated a
+ * warning that could be easily suppressed by the @ operator. But as of PHP 8
+ * a disabled internal function is treated like it is undefined, which means
+ * a fatal error will be thrown and execution will halt. SMF expects the old
+ * behaviour, so these no-op polyfills make sure that is what happens.
+ */
+if (version_compare(PHP_VERSION, '8.0.0', '>='))
+{
+	/*
+	 * This array contains function names that meet the following conditions:
+	 *
+	 * 1. SMF assumes they are defined, even if disabled. Note that prior to
+	 *    PHP 8, this was always true for internal functions.
+	 *
+	 * 2. Some hosts are known to disable them.
+	 *
+	 * 3. SMF can get by without them (as opposed to missing functions that
+	 *    really SHOULD cause execution to halt).
+	 */
+	foreach (array('set_time_limit') as $func)
+	{
+		if (!function_exists($func))
+			eval('function ' . $func . '() { trigger_error("' . $func . '() has been disabled for security reasons", E_USER_WARNING); }');
+	}
+	unset($func);
 }
 
 ?>
