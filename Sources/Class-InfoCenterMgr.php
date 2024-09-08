@@ -107,8 +107,8 @@ final class InfoCenterMgr
 		$number_recent_posts = count($context['latest_posts']);
 		
 		// To avoid fetching all posts in the board, we estimate a conservative upper limit
-		// on the number of posts to retrieve from the DB
-		$query_limit = $number_recent_posts * 100;
+		// on the number of posts to retrieve from the DB (Toned down as an LF modification)
+		$query_limit = $number_recent_posts * 10;
 		
 		// The following query and processing code basically replicates what is in Subs-Recents.php, but
 		// with modifications for our purposes
@@ -123,7 +123,7 @@ final class InfoCenterMgr
 				INNER JOIN {db_prefix}boards AS b ON (b.id_board = t.id_board)
         INNER JOIN {db_prefix}messages AS mfirst ON (mfirst.id_msg = t.id_first_msg)
 				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = m.id_member)
-			WHERE m.id_msg >= 0' .
+			WHERE m.id_msg >= {int:likely_max_msg}' .
 				(!empty($modSettings['recycle_enable']) && $modSettings['recycle_board'] > 0 ? '
 				AND b.id_board != {int:recycle_board}' : '') . '
 				AND {query_wanna_see_board}' . ($modSettings['postmod_active'] ? '
@@ -134,6 +134,7 @@ final class InfoCenterMgr
 			LIMIT
 				{int:query_limit}',
 			array(
+        'likely_max_msg' => max(0, $modSettings['maxMsgID'] - $query_limit),
 				'recycle_board' => $modSettings['recycle_board'],
 				'query_limit' => $query_limit
 			)
