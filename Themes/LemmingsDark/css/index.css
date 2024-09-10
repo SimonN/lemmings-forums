@@ -1,73 +1,73 @@
 @import url("../../default/css/index.css");
 
 #top_section .inner_wrap, #wrapper, #header, #footer .inner_wrap {
-  max-width: none;
+    max-width: none;
 }
 
 #wrapper {
-  overflow: hidden;
+    overflow: hidden;
 }
 
 input, button, select, textarea {
-	color: #ddd;
-  background: #000;
+    color: #ddd;
+    background: #000;
 }
 textarea:hover {
-	background: #010;
+    background: #010;
 }
 input:focus, textarea:focus, button:focus, select:focus {
-  background: #010;
+    background: #010;
 }
 
 body {
-	background-image: url("../images/background.png");
-  color: #b8b8b8;
+    background-image: url("../images/background.png");
+    color: #b8b8b8;
 }
 
 strong {
-  color: #b8b8b8;
+    color: #b8b8b8;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  color: #b8b8b8;
+    color: #b8b8b8;
 }
 
 a, a:visited {
-	color: #8AF;
+    color: #8AF;
 }
 
 .button, .quickbuttons > li > a, .inline_mod_check {
-	color: #CCC;
+    color: #CCC;
 }
 
 #top_section {
-	border-bottom: 1px solid #242;
+    border-bottom: 1px solid #242;
 }
 
 .navigate_section ul li {
-	text-shadow: 1px 1px 0 #666;  
-  color: #ccc;
+    text-shadow: 1px 1px 0 #666;
+    color: #ccc;
 }
 
 #wrapper {
-	background: #010;
-	border: 1px solid #363;
-	box-shadow: 0 2px 3px rgba(0, 0, 0, 0.14);
+    background: #010;
+    border: 1px solid #363;
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.14);
 }
 
 .roundframe {
-  background: #020;
-  border: 1px solid #363;
+    background: #020;
+    border: 1px solid #363;
 }
 
 .titlebg a, .subbg a {
-	background: none;
-	color: #CCC;
-	text-decoration: none;
+    background: none;
+    color: #CCC;
+    text-decoration: none;
 }
 
 #ic_recentposts td {
-	border-top: none;
+    border-top: none;
 }
 
 .dropmenu li ul, .top_menu, .dropmenu li li:hover, .button,
@@ -76,107 +76,107 @@ a, a:visited {
 .quickbuttons li ul, .quickbuttons li ul li a:hover, .quickbuttons ul li a:focus,
 .inline_mod_check, .popup_window, #inner_section, .post_options ul,
 .post_options ul a:hover, .post_options ul a:focus, .notify_dropdown a:hover, .notify_dropdown a:focus {
-	background: #000;
-	background-image: linear-gradient(#050 0%, #010 70%);
+    background: #000;
+    background-image: linear-gradient(#050 0%, #010 70%);
 }
 
 .button:hover, #search_form .button:hover, .quickbuttons li:hover {
-	background: #000;
-	background-image: linear-gradient(to bottom, #010 0%, #050 70%);
+    background: #000;
+    background-image: linear-gradient(to bottom, #010 0%, #050 70%);
 }
 
 .button.active {
-  background: #000;
-	background-image: linear-gradient(#050 0%, #010 70%);
-  border: 1px solid;
+    background: #000;
+    background-image: linear-gradient(#050 0%, #010 70%);
+    border: 1px solid;
 }
 .button.active:hover, .button.active:focus {
-  color: #CCC;
-  background: #000;
-	background-image: linear-gradient(to bottom, #010 0%, #050 70%);
-  border: 1px solid;
-  border-color: #aaa #ddd #ddd #bbb;
-  box-shadow: -1px -1px 2px rgba(221, 221, 221, 0.7), -1px -2px 4px #ddd inset;
+    color: #CCC;
+    background: #000;
+    background-image: linear-gradient(to bottom, #010 0%, #050 70%);
+    border: 1px solid;
+    border-color: #aaa #ddd #ddd #bbb;
+    box-shadow: -1px -1px 2px rgba(221, 221, 221, 0.7), -1px -2px 4px #ddd inset;
 }
 
 .navigate_section ul, .popup_content, .up_contain {
-	background: #000;
-	background-image: linear-gradient(to bottom, #010 0%, #030 95%);
-  border: 1px solid;
+    background: #000;
+    background-image: linear-gradient(to bottom, #010 0%, #030 95%);
+    border: 1px solid;
 }
 
 .info .subject {
-	color: #bb3;
+    color: #bb3;
 }
 
 .title_bar {
-	border: 1px solid #333;
-	border-top: 2px solid #282;
-	border-bottom: 2px solid #282;
-	background: #363;
+    border: 1px solid #333;
+    border-top: 2px solid #282;
+    border-bottom: 2px solid #282;
+    background: #363;
 }
 
 div.cat_bar {
-	background: #383;
+    background: #383;
 }
 
 .up_contain {
-	border: 1px solid #242;
+    border: 1px solid #242;
 }
 
 .boardindex_table .board_stats p {
-	border-left: none;
-	border-right: none;
+    border-left: none;
+    border-right: none;
 }
 
 .children {
-	border-top: 1px solid #242;
+    border-top: 1px solid #242;
 }
 
 .information {
-	background: #030;
+    background: #030;
 }
 
 .pagesection .button {
-	color: #CCC;
+    color: #CCC;
 }
 
 .windowbg:nth-of-type(even), .bg.even {
-	background: #020;
+    background: #020;
 }
 .windowbg:nth-of-type(odd), .bg.odd {
-	background: #030;
+    background: #030;
 }
 .windowbg.sticky {
-	background: #040;
+    background: #040;
 }
 .windowbg.locked {
-  background: #010;
+    background: #010;
 }
 .windowbg.sticky.locked {
-  background: #010;
+    background: #010;
 }
 
 .dropmenu li:hover li a, .dropmenu li li a {
-  color: #ddd;
+    color: #ddd;
 }
 
 .errorbox {
-	background-color: #410;
-	border-top: 2px solid #520;
-	border-bottom: 2px solid #520;
+    background-color: #410;
+    border-top: 2px solid #520;
+    border-bottom: 2px solid #520;
 }
 
 .bbc_standard_quote {
-  background-color: #040;
+    background-color: #040;
 }
 
 .content_section
 {
-  margin: 0px 2px 2px 2px;
-  border-radius: 0px 0px 7px 7px;
+    margin: 0px 2px 2px 2px;
+    border-radius: 0px 0px 7px 7px;
 }
 
 #navigate-section {
-  padding: 3px 2px 0px 2px;
+    padding: 3px 2px 0px 2px;
 }
