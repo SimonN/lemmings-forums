@@ -21,7 +21,8 @@ input:focus, textarea:focus, button:focus, select:focus {
 
 body {
     background-image: url("../images/background.png");
-    color: #b8b8b8;
+    color: #e8e8e8;
+    font: 90%/140% system-ui;
 }
 
 strong {
@@ -142,10 +143,10 @@ div.cat_bar {
 }
 
 .windowbg:nth-of-type(even), .bg.even {
-    background: #020;
+    background: #001800;
 }
 .windowbg:nth-of-type(odd), .bg.odd {
-    background: #030;
+    background: #002400;
 }
 .windowbg.sticky {
     background: #040;
@@ -168,7 +169,24 @@ div.cat_bar {
 }
 
 .bbc_standard_quote {
+    background-color: #030;
+}
+
+.bbc_alternate_quote {
     background-color: #040;
+}
+
+.keyinfo .postinfo .modified {
+    color: white;
+}
+
+.post .inner, .signature {
+    border-top: 1px solid #363;
+    box-shadow: 0 1px 0 #363 inset;
+}
+
+.generic_list_wrapper, .windowbg, .approvebg, .approvebg2, .button {
+    border: 1px solid #363;
 }
 
 .content_section
