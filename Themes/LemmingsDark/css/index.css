@@ -105,6 +105,10 @@ a, a:visited {
     border: 1px solid;
 }
 
+.popup_content {
+    color: #ddd;
+}
+
 .info .subject {
     color: #bb3;
 }
@@ -173,6 +177,10 @@ div.cat_bar {
 
 .bbc_alternate_quote {
     background-color: #040;
+}
+
+.bbc_code {
+    background-color: #111;
 }
 
 .keyinfo .postinfo .modified {
