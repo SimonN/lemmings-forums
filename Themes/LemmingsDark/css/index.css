@@ -22,7 +22,6 @@ input:focus, textarea:focus, button:focus, select:focus {
 body {
     background-image: url("../images/background.png");
     color: #e8e8e8;
-    font: 90%/150% "Segoe UI", "Helvetica Neue", "Nimbus Sans L", Arial, "Liberation Sans", system-ui, sans-serif;
 }
 
 strong {

@@ -6,7 +6,7 @@ html {
 }
 body {
 	background: #e9eef2;
-	font: 83.33%/150% "Segoe UI", "Helvetica Neue", "Nimbus Sans L", Arial, "Liberation Sans", sans-serif;
+	font: 90%/150% "Segoe UI", "Helvetica Neue", "Nimbus Sans L", Arial, "Liberation Sans", system-ui, sans-serif;
 	color: #4d4d4d;
 	display: flex;
 	flex-direction: column;
