@@ -6,6 +6,12 @@ Powered by <a href="http://www.simplemachines.org" target="_blank">Simple Machin
 Copyright 2011
 <a href="http://www.simplemachines.org/about/smf/license.php" target="_blank">License BSD</a>
 
+Some files are from addons. The licences for these are in their files.
+
+add_hooks.php should be removed on the live server. It does not need to be run when restoring from a backup;
+it would need to be run if setting up the site again from scratch, discarding the old database. (It's harmless
+to keep it, but doesn't need to be there.)
+
 Database passwords
 ------------------
 
