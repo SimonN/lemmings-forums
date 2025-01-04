@@ -173,10 +173,12 @@ div.cat_bar {
 
 .bbc_standard_quote {
     background-color: #030;
+    border: 1px solid #363;
 }
 
 .bbc_alternate_quote {
     background-color: #040;
+    border: 1px solid #363;
 }
 
 .bbc_code {
