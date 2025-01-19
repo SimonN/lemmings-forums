@@ -189,6 +189,22 @@ div.cat_bar {
     color: white;
 }
 
+.keyinfo .postinfo a,
+.keyinfo .postinfo a strong,
+.page_number,
+.current_page {
+    color: #bb3;
+}
+
+.poster h4,
+.poster h4 a,
+.poster li:hover h4 a,
+.poster h4 a:hover
+.poster li h4 a,
+.poster h4 a:focus {
+    color: #bb3;
+}
+
 .post .inner, .signature {
     border-top: 1px solid #363;
     box-shadow: 0 1px 0 #363 inset;
