@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.2
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -175,7 +175,7 @@ function getEventRange($low_date, $high_date, $use_permissions = true)
 		$start_date_string = date_format($start_object, 'Y-m-d');
 		$end_date_string = date_format($end_object, 'Y-m-d');
 
-		$cal_date = ($start_object >= $low_object) ? $start_object : $low_object;
+		$cal_date = ($start_object >= $low_object) ? (clone $start_object) : (clone $low_object);
 		while ($cal_date <= $end_object && $cal_date <= $high_object)
 		{
 			$starts_today = (date_format($cal_date, 'Y-m-d') == $start_date_string);
@@ -246,7 +246,7 @@ function getEventRange($low_date, $high_date, $use_permissions = true)
 					'topic' => $row['id_topic'],
 					'msg' => $row['id_first_msg'],
 					'poster' => $row['id_member'],
-					'allowed_groups' => explode(',', $row['member_groups']),
+					'allowed_groups' => isset($row['member_groups']) ? explode(',', $row['member_groups']) : array(),
 				));
 
 			date_add($cal_date, date_interval_create_from_date_string('1 day'));
@@ -810,6 +810,7 @@ function loadTimePicker($selector = 'input.time_input', $time_format = '')
 			decimal: "' . $txt['decimal_sign'] . '",
 			mins: "' . $txt['minutes_short'] . '",
 			hr: "' . $txt['hour_short'] . '",
+			hrs: "' . $txt['hours_short'] . '",
 		}
 	});', true);
 }
@@ -1881,8 +1882,11 @@ function convertDateToEnglish($date)
 		'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'
 	));
 	// Find all possible variants of AM and PM for this language.
-	$replacements[strtolower($txt['time_am'])] = 'AM';
-	$replacements[strtolower($txt['time_pm'])] = 'PM';
+	if (trim($txt['time_am']) !== '' && trim($txt['time_pm']) !== '')
+	{
+		$replacements[strtolower($txt['time_am'])] = 'AM';
+		$replacements[strtolower($txt['time_pm'])] = 'PM';
+	}
 	if (($am = smf_strftime('%p', strtotime('01:00:00'))) !== 'p' && $am !== false)
 	{
 		$replacements[strtolower($am)] = 'AM';

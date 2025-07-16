@@ -8,10 +8,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.0
+ * @version 2.1.6
  */
 
 if (!defined('SMF'))
@@ -648,14 +648,17 @@ function ob_sessrewrite($buffer)
 {
 	global $scripturl, $modSettings, $context;
 
+	// PHP 8.4 deprecated SID. A better long-term solution is needed, but this works for now.
+	$sid = defined('SID') ? @constant('SID') : null;
+
 	// If $scripturl is set to nothing, or the SID is not defined (SSI?) just quit.
-	if ($scripturl == '' || !defined('SID'))
+	if ($scripturl == '' || !isset($sid))
 		return $buffer;
 
 	// Do nothing if the session is cookied, or they are a crawler - guests are caught by redirectexit().  This doesn't work below PHP 4.3.0, because it makes the output buffer bigger.
 	// @todo smflib
-	if (empty($_COOKIE) && SID != '' && !isBrowser('possibly_robot'))
-		$buffer = preg_replace('/(?<!<link rel="canonical" href=)"' . preg_quote($scripturl, '/') . '(?!\?' . preg_quote(SID, '/') . ')\\??/', '"' . $scripturl . '?' . SID . '&amp;', $buffer);
+	if (empty($_COOKIE) && $sid != '' && !isBrowser('possibly_robot'))
+		$buffer = preg_replace('/(?<!<link rel="canonical" href=)"' . preg_quote($scripturl, '/') . '(?!\?' . preg_quote($sid, '/') . ')\\??/', '"' . $scripturl . '?' . $sid . '&amp;', $buffer);
 	// Debugging templates, are we?
 	elseif (isset($_GET['debug']))
 		$buffer = preg_replace('/(?<!<link rel="canonical" href=)"' . preg_quote($scripturl, '/') . '\\??/', '"' . $scripturl . '?debug;', $buffer);
@@ -664,14 +667,12 @@ function ob_sessrewrite($buffer)
 	if (!empty($modSettings['queryless_urls']) && (!$context['server']['is_cgi'] || ini_get('cgi.fix_pathinfo') == 1 || @get_cfg_var('cgi.fix_pathinfo') == 1) && ($context['server']['is_apache'] || $context['server']['is_lighttpd'] || $context['server']['is_litespeed']))
 	{
 		// Let's do something special for session ids!
-		if (defined('SID') && SID != '')
+		if (isset($sid) && $sid != '')
 			$buffer = preg_replace_callback(
-				'~"' . preg_quote($scripturl, '~') . '\?(?:' . SID . '(?:;|&|&amp;))((?:board|topic)=[^#"]+?)(#[^"]*?)?"~',
-				function($m)
+				'~"' . preg_quote($scripturl, '~') . '\?(?:' . $sid . '(?:;|&|&amp;))((?:board|topic)=[^#"]+?)(#[^"]*?)?"~',
+				function($m) use ($scripturl, $sid)
 				{
-					global $scripturl;
-
-					return '"' . $scripturl . "/" . strtr("$m[1]", '&;=', '//,') . ".html?" . SID . (isset($m[2]) ? $m[2] : "") . '"';
+					return '"' . $scripturl . "/" . strtr("$m[1]", '&;=', '//,') . ".html?" . $sid . (isset($m[2]) ? $m[2] : "") . '"';
 				},
 				$buffer
 			);

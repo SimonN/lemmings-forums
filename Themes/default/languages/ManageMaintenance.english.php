@@ -1,5 +1,5 @@
 <?php
-// Version: 2.1.0; ManageMaintenance
+// Version: 2.1.5; ManageMaintenance
 
 $txt['repair_zero_ids'] = 'Found topics and/or messages with topic or message IDs of 0.';
 $txt['repair_missing_topics'] = 'Message #%1$d is in non-existent topic #%2$d.';
@@ -160,7 +160,7 @@ $txt['maintain_run_now'] = 'Run task now';
 $txt['maintain_return'] = 'Back to Forum Maintenance';
 
 $txt['maintain_backup'] = 'Backup Database';
-$txt['maintain_backup_info'] = 'Download a backup copy of your forums database in case of emergency.';
+$txt['maintain_backup_info'] = 'Download a backup copy of your forum\'s database in case of emergency.';
 $txt['maintain_backup_struct'] = 'Save the table structure.';
 $txt['maintain_backup_data'] = 'Save the table data (the important stuff).';
 $txt['maintain_backup_gz'] = 'Compress the file with gzip.';

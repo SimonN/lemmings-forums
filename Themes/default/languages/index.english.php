@@ -1,5 +1,5 @@
 <?php
-// Version: 2.1.3; index
+// Version: 2.1.5; index
 
 global $forum_copyright, $webmaster_email, $scripturl, $context, $boardurl;
 
@@ -49,7 +49,7 @@ $txt['minutes_short'] = 'mins';
 $txt['hour_short'] = 'hr';
 // Short form of hours
 $txt['hours_short'] = 'hrs';
-// Descimal sign
+// Decimal sign
 $txt['decimal_sign'] = '.';
 
 $txt['admin'] = 'Admin';

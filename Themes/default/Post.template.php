@@ -4,10 +4,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 /**
@@ -367,11 +367,11 @@ function template_main()
 											<div class="attached_BBC_width_height">
 												<div class="attached_BBC_width">
 													<label for="attached_BBC_width">', $txt['attached_insert_width'], '</label>
-													<input type="number" name="attached_BBC_width" min="0" value="">
+													<input type="number" name="attached_BBC_width" min="0" value="" placeholder="', $txt['attached_insert_placeholder'], '">
 												</div>
 												<div class="attached_BBC_height">
 													<label for="attached_BBC_height">', $txt['attached_insert_height'], '</label>
-													<input type="number" name="attached_BBC_height" min="0" value="">
+													<input type="number" name="attached_BBC_height" min="0" value="" placeholder="', $txt['attached_insert_placeholder'], '">
 												</div>
 											</div>
 										</div>

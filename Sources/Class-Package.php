@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.0
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -363,10 +363,10 @@ class xmlArray
 		);
 
 		// Loop until we're out of data.
-		while ($data != '')
+		while ($data !== '')
 		{
 			// Find and remove the next tag.
-			preg_match('/\A<([\w\-:]+)((?:\s+.+?)?)([\s]?\/)?' . '>/', $data, $match);
+			preg_match('/\A<([\w\-:]+)((?:\s+[\s\S]+?)?)([\s]?\/)?' . '>/', $data, $match);
 			if (isset($match[0]))
 				$data = preg_replace('/' . preg_quote($match[0], '/') . '/s', '', $data, 1);
 

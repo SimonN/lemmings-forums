@@ -5,16 +5,18 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
 	die('No direct access...');
 
-require_once($sourcedir . '/Unicode/Metadata.php');
+// If this file is missing, we're using an old version of Unicode.
+if (!@include_once($sourcedir . '/Unicode/Metadata.php'))
+	define('SMF_UNICODE_VERSION', '14.0.0.0');
 
 /**
  * Converts the given UTF-8 string into lowercase.
@@ -716,10 +718,6 @@ function utf8_sanitize_invisibles($string, $level, $substitute)
 	$disallowed[] = '[' . implode('', array(
 		// Soft Hyphen.
 		'\x{AD}',
-		// Khmer Vowel Inherent AQ and Khmer Vowel Inherent AA.
-		// Unicode Standard ch. 16 says: "they are insufficient for [their]
-		// purpose and should be considered errors in the encoding."
-		'\x{17B4}-\x{17B5}',
 		// Invisible math characters.
 		'\x{2061}-\x{2064}',
 		// Deprecated formatting characters.

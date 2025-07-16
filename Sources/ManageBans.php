@@ -9,10 +9,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -158,7 +158,7 @@ function BanList()
 				),
 				'data' => array(
 					'db' => 'notes',
-					'class' => 'smalltext',
+					'class' => 'smalltext word_break',
 				),
 				'sort' => array(
 					'default' => 'LENGTH(bg.notes) > 0 DESC, bg.notes',
@@ -171,7 +171,7 @@ function BanList()
 				),
 				'data' => array(
 					'db' => 'reason',
-					'class' => 'smalltext',
+					'class' => 'smalltext word_break',
 				),
 				'sort' => array(
 					'default' => 'LENGTH(bg.reason) > 0 DESC, bg.reason',
@@ -471,13 +471,13 @@ function BanEdit()
 				),
 				'additional_rows' => array(
 					array(
-						'position' => 'above_table_headers',
+						'position' => 'above_column_headers',
 						'value' => '
 						<input type="submit" name="remove_selection" value="' . $txt['ban_remove_selected_triggers'] . '" class="button"> <a class="button" href="' . $scripturl . '?action=admin;area=ban;sa=edittrigger;bg=' . $ban_group_id . '">' . $txt['ban_add_trigger'] . '</a>',
 						'style' => 'text-align: right;',
 					),
 					array(
-						'position' => 'above_table_headers',
+						'position' => 'above_column_headers',
 						'value' => '
 						<input type="hidden" name="bg" value="' . $ban_group_id . '">
 						<input type="hidden" name="' . $context['session_var'] . '" value="' . $context['session_id'] . '">
@@ -868,6 +868,9 @@ function banEdit2()
 		$ban_info['cannot']['login'] = !empty($ban_info['full_ban']) || empty($_POST['cannot_login']) ? 0 : 1;
 
 		call_integration_hook('integrate_edit_bans', array(&$ban_info, empty($_REQUEST['bg'])));
+
+		// Limit 'reason' characters
+		$ban_info['reason'] = $smcFunc['truncate']($ban_info['reason'], 255);
 
 		// Adding a new ban group
 		if (empty($_REQUEST['bg']))
@@ -1495,6 +1498,8 @@ function updateBanGroup($ban_info = array())
 
 	if (empty($ban_info['name']))
 		$context['ban_errors'][] = 'ban_name_empty';
+	if ($smcFunc['strlen']($ban_info['name']) > 20)
+		$context['ban_errors'][] = 'ban_name_is_too_long';
 	if (empty($ban_info['id']))
 		$context['ban_errors'][] = 'ban_id_empty';
 	if (empty($ban_info['cannot']['access']) && empty($ban_info['cannot']['register']) && empty($ban_info['cannot']['post']) && empty($ban_info['cannot']['login']))
@@ -1584,6 +1589,8 @@ function insertBanGroup($ban_info = array())
 
 	if (empty($ban_info['name']))
 		$context['ban_errors'][] = 'ban_name_empty';
+	if ($smcFunc['strlen']($ban_info['name']) > 20)
+		$context['ban_errors'][] = 'ban_name_is_too_long';
 	if (empty($ban_info['cannot']['access']) && empty($ban_info['cannot']['register']) && empty($ban_info['cannot']['post']) && empty($ban_info['cannot']['login']))
 		$context['ban_errors'][] = 'ban_unknown_restriction_type';
 

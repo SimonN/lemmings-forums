@@ -9,10 +9,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.3
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -643,9 +643,7 @@ function sendmail($to, $subject, $message, $from = null, $message_id = null, $se
 	$headers .= $from !== null ? 'Reply-To: <' . $from . '>' . $line_break : '';
 	$headers .= 'Return-Path: ' . (empty($modSettings['mail_from']) ? $webmaster_email : $modSettings['mail_from']) . $line_break;
 	$headers .= 'Date: ' . gmdate('D, d M Y H:i:s') . ' -0000' . $line_break;
-
-	if ($message_id !== null && empty($modSettings['mail_no_message_id']))
-		$headers .= 'Message-ID: <' . md5($scripturl . microtime()) . '-' . $message_id . strstr(empty($modSettings['mail_from']) ? $webmaster_email : $modSettings['mail_from'], '@') . '>' . $line_break;
+	$headers .= 'Message-ID: <' . md5($scripturl . microtime()) . '-' . ($message_id ?? 0) . strstr(empty($modSettings['mail_from']) ? $webmaster_email : $modSettings['mail_from'], '@') . '>' . $line_break;
 	$headers .= 'X-Mailer: SMF' . $line_break;
 
 	// Pass this to the integration before we start modifying the output -- it'll make it easier later.
@@ -1689,9 +1687,18 @@ function server_parse($message, $socket, $code, &$response = null)
 	if ($code === null)
 		return substr($server_response, 0, 3);
 
-	if (substr($server_response, 0, 3) != $code)
+	$response_code = (int) substr($server_response, 0, 3);
+	if ($response_code != $code)
 	{
-		log_error($txt['smtp_error'] . $server_response);
+		// Ignoreable errors that we can't fix should not be logged.
+		/*
+		 * 550 - cPanel rejected sending due to DNS issues
+		 * 450 - DNS Routing issues
+		 * 451 - cPanel "Temporary local problem - please try later"
+		 */
+		if ($response_code < 500 && !in_array($response_code, array(450, 451)))
+			log_error($txt['smtp_error'] . $server_response);
+
 		return false;
 	}
 

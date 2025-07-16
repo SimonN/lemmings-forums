@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -227,6 +227,13 @@ function createMenu($menuData, $menuOptions = array())
 								// Mark it as disabled...
 								else
 									$menu_context['sections'][$section_id]['areas'][$area_id]['subsections'][$sa]['disabled'] = true;
+							}
+
+							// If permissions removed/disabled for all submenu items, remove the menu item
+							if (empty($first_sa) && empty($last_sa))
+							{
+								unset($menu_context['sections'][$section_id]['areas'][$area_id]);
+								continue;
 							}
 
 							// Set which one is first, last and selected in the group.

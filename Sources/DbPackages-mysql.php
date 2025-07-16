@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -172,7 +172,7 @@ function smf_db_create_table($table_name, $columns, $indexes = array(), $paramet
 			if (
 				$key === false
 				|| !isset($columns[$key])
-				|| !in_array($columns[$key]['type'], array('text', 'mediumntext', 'largetext', 'varchar', 'char'))
+				|| !in_array($columns[$key]['type'], array('text', 'mediumtext', 'largetext', 'varchar', 'char'))
 				|| (
 					isset($size)
 					&& $size <= 191
@@ -254,6 +254,7 @@ function smf_db_create_table($table_name, $columns, $indexes = array(), $paramet
 
 		while ($row = $smcFunc['db_fetch_assoc']($request))
 		{
+			$row = array_change_key_case($row, CASE_LOWER);
 			$same_col[] = $row['column_name'];
 		}
 
@@ -534,7 +535,7 @@ function smf_db_add_index($table_name, $index_info, $parameters = array(), $if_e
 		// If a size was already specified, we won't be able to match it anyways.
 		if (
 			!isset($cols[$c])
-			|| !in_array($cols[$c]['type'], array('text', 'mediumntext', 'largetext', 'varchar', 'char'))
+			|| !in_array($cols[$c]['type'], array('text', 'mediumtext', 'largetext', 'varchar', 'char'))
 			|| (
 				isset($size)
 				&& $size <= 191

@@ -4,10 +4,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.0
+ * @version 2.1.5
  */
 
 /**
@@ -59,7 +59,7 @@ function template_show_list($list_id = null)
 		// Show the page index (if this list doesn't intend to show all items).
 		if (!empty($cur_list['items_per_page']) && !empty($cur_list['page_index']))
 			echo '
-		<div class="pagesection">
+		<div class="pagesection floatleft">
 			<div class="pagelinks">', $cur_list['page_index'], '</div>
 		</div>';
 

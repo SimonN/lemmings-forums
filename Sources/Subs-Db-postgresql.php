@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2023 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -52,7 +52,7 @@ function smf_db_initiate($db_server, $db_name, $db_user, $db_passwd, &$db_prefix
 			'db_server_info'            => 'smf_db_version',
 			'db_affected_rows'          => 'smf_db_affected_rows',
 			'db_transaction'            => 'smf_db_transaction',
-			'db_error'                  => 'pg_last_error',
+			'db_error'                  => 'smf_db_errormsg',
 			'db_select_db'              => 'smf_db_select_db',
 			'db_title'                  => POSTGRE_TITLE,
 			'db_sybase'                 => true,
@@ -773,7 +773,7 @@ function smf_db_insert($method, $table, $columns, $data, $keys, $returnmode = 0,
 				{
 					$with_returning = false;
 					loadLanguage('Errors');
-					trigger_error($txt['postgres_id_not_int'], E_USER_ERROR);
+					throw new \TypeError('postgres_id_not_int');
 				}
 			}
 		}
@@ -1031,6 +1031,22 @@ function smf_db_connect_errno()
 		$pg_connect_errno = '';
 
 	return $pg_connect_errno;
+}
+
+/**
+ * Wrapper to handle null errors
+ *
+ * @param null|PgSql\Connection $connection = null The connection to use (null to use $db_connection)
+ * @return string escaped string
+ */
+function smf_db_errormsg($connection = null)
+{
+	global $db_connection;
+
+	if ($connection === null && $db_connection === null)
+		return '';
+
+	return pg_last_error($connection === null ? $db_connection : $connection);
 }
 
 ?>

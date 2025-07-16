@@ -10,10 +10,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.3
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -158,8 +158,11 @@ function read_tgz_data($data, $destination, $single_file = false, $overwrite = f
 		$current['data'] = substr($data, ++$offset << 9, $current['size']);
 		$offset += $size;
 
+		// If hunting for a file in subdirectories, pass to subsequent write test...
+		if ($single_file && $destination !== null && (substr($destination, 0, 2) == '*/'))
+			$write_this = true;
 		// Not a directory and doesn't exist already...
-		if (substr($current['filename'], -1, 1) != '/' && $destination !== null && !file_exists($destination . '/' . $current['filename']))
+		elseif (substr($current['filename'], -1, 1) != '/' && $destination !== null && !file_exists($destination . '/' . $current['filename']))
 			$write_this = true;
 		// File exists... check if it is newer.
 		elseif (substr($current['filename'], -1, 1) != '/')
@@ -230,7 +233,7 @@ function read_tgz_data($data, $destination, $single_file = false, $overwrite = f
 function read_zip_data($data, $destination, $single_file = false, $overwrite = false, $files_to_extract = null)
 {
 	umask(0);
-	if ($destination !== null && !file_exists($destination) && !$single_file)
+	if ($destination !== null && (substr($destination, 0, 2) != '*/') && !file_exists($destination) && !$single_file)
 		mktree($destination, 0777);
 
 	// Search for the end of directory signature 0x06054b50.
@@ -291,8 +294,11 @@ function read_zip_data($data, $destination, $single_file = false, $overwrite = f
 		$write_this = false;
 		if ($destination !== null)
 		{
+			// If hunting for a file in subdirectories, pass to subsequent write test...
+			if ($single_file && $destination !== null && (substr($destination, 0, 2) == '*/'))
+				$write_this = true;
 			// If this is a file, and it doesn't exist.... happy days!
-			if ($is_file)
+			elseif ($is_file)
 				$write_this = !file_exists($destination . '/' . $file_info['filename']) || $overwrite;
 			// This is a directory, so we're gonna want to create it. (probably...)
 			elseif (!$single_file)
@@ -1218,7 +1224,8 @@ function parsePackageInfo(&$packageXML, $testing_only = true, $method = 'install
 			$this_action = array(
 				'type' => $actionType,
 				'filename' => $action->fetch('@name'),
-				'description' => $action->fetch('.')
+				'description' => $action->fetch('.'),
+				'error' => $action->exists('@error') ? $action->fetch('@error') : 'fail'
 			);
 
 			// If there is a destination, make sure it makes sense.
@@ -1452,7 +1459,7 @@ function parsePackageInfo(&$packageXML, $testing_only = true, $method = 'install
 			}
 			// The file that was supposed to be deleted couldn't be found.
 			else
-				$failure = true;
+				$failure = $action['error'] != 'ignore';
 
 			// Any other theme folders?
 			if (!empty($context['theme_copies']) && !empty($context['theme_copies'][$action['type']][$action['filename']]))
@@ -1647,7 +1654,7 @@ function parse_path($path)
 	if (strlen($path) == 0)
 	{
 		loadLanguage('Errors');
-		trigger_error($txt['parse_path_filename_required'], E_USER_ERROR);
+		throw new \Exception('parse_path_filename_required');
 	}
 
 	return strtr($path, $dirs);

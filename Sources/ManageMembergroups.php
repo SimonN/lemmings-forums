@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.3
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -173,7 +173,7 @@ function MembergroupIndex()
 		),
 		'additional_rows' => array(
 			array(
-				'position' => 'above_table_headers',
+				'position' => 'above_column_headers',
 				'value' => '<a class="button" href="' . $scripturl . '?action=admin;area=membergroups;sa=add;generalgroup">' . $txt['membergroups_add_group'] . '</a>',
 			),
 			array(
@@ -1047,7 +1047,9 @@ function EditMembergroup()
 		}
 
 		// There might have been some post group changes.
-		updateStats('postgroups');
+		if ($_POST['min_posts'] != -1)
+			updateStats('postgroups');
+
 		// We've definitely changed some group stuff.
 		updateSettings(array(
 			'settings_updated' => time(),
@@ -1168,7 +1170,7 @@ function EditMembergroup()
 	}
 
 	// Get a list of all the image formats we can select.
-	$imageExts = array('png', 'jpg', 'jpeg', 'bmp', 'gif');
+	$imageExts = array('png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp');
 
 	// Scan the directory.
 	$context['possible_icons'] = array();

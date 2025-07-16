@@ -7,10 +7,10 @@
  *
  * @package SMF
  * @author Simple Machines https://www.simplemachines.org
- * @copyright 2022 Simple Machines and individual contributors
+ * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.3
+ * @version 2.1.5
  */
 
 if (!defined('SMF'))
@@ -25,6 +25,11 @@ class Likes
 	 * @var boolean Know if a request comes from an ajax call or not, depends on $_GET['js'] been set.
 	 */
 	protected $_js = false;
+
+	/**
+	 * @var string The sub action sent in $_GET['sa'].
+	 */
+	protected $_sa = null;
 
 	/**
 	 * @var string If filled, its value will contain a string matching a key on a language var $txt[$this->_error]
@@ -339,7 +344,7 @@ class Likes
 		call_integration_hook('integrate_issue_like_before', array(&$type, &$content, &$user, &$time));
 
 		// Insert the like.
-		$smcFunc['db_insert']('insert',
+		$smcFunc['db_insert']('ignore',
 			'{db_prefix}user_likes',
 			array('content_id' => 'int', 'content_type' => 'string-6', 'id_member' => 'int', 'like_time' => 'int'),
 			array($content, $type, $user['id'], $time),
