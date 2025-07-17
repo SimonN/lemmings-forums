@@ -101,7 +101,7 @@ $cookiename = 'LFCookie42';
  *
  * @var string
  */
-$auth_secret = '5e8a43052fa1c935d3b6f9c131008958b72b454c9834bb5ca994e71a1310165c';
+$auth_secret = '';
 
 ########## Database Info ##########
 /**
@@ -227,7 +227,7 @@ $image_proxy_enabled = false;
  *
  * @var string
  */
-$image_proxy_secret = '9b9c2b37f942bb4be9d3';
+$image_proxy_secret = '';
 /**
  * Maximum file size (in KB) for individual files
  *
