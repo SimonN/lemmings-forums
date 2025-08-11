@@ -803,6 +803,7 @@ function ReduceMailQueue($number = false, $override_limit = false, $force_send =
 		require_once($sourcedir . '/Subs-Post.php');
 
 	// Send each email, yea!
+  // There are some changes in this section, see: https://github.com/SimpleMachines/SMF/pull/8716/commits/a2559b060bf6f6e91d151fbb5dd6250bf26d5e17
 	$failed_emails = array();
 	$max_priority = 127;
 	$smtp_expire = 259200;
@@ -811,8 +812,10 @@ function ReduceMailQueue($number = false, $override_limit = false, $force_send =
 	{
 		// First, figure out when the next send attempt should happen based on the current priority.
 		$next_send_time = $email['time_sent'];
-		for ($i = 0; $i < $email['priority']; $i++) {
-			$next_send_time += 20 * max(0, $email['priority'] - $priority_offset);
+		if ($email['priority'] >= $priority_offset) {
+			for ($i = 0; $i < $email['priority']; $i++) {
+				$next_send_time += 20 * max(0, $email['priority'] - $priority_offset);
+			}
 		}
 
 		// If the email is too old, discard it.
@@ -820,10 +823,10 @@ function ReduceMailQueue($number = false, $override_limit = false, $force_send =
 			continue;
 		}
 
-		$email['priority'] = max($priority_offset, $email['priority'], min(ceil((time() - $email['time_sent']) / $smtp_expire * ($max_priority - $priority_offset)) + $priority_offset, $max_priority));
+		++$email['priority'];
 
-		// Don't send if it's too soon. Also, if we've already failed a few times, only send on every fourth attempt so that we don't DOS some poor mail server.
-		if (time() < $next_send_time || ($email['priority'] >= $priority_offset && $email['priority'] % 4 !== 0)) {
+		// Don't send if it's too soon.
+		if (time() < $next_send_time) {
 			if ($email['priority'] < $max_priority) {
 				$failed_emails[] = array($email['to'], $email['body'], $email['subject'], $email['headers'], $email['send_html'], $email['time_sent'], $email['private'], $email['priority']);
 			}
