@@ -2133,7 +2133,7 @@ function createPost(&$msgOptions, &$topicOptions, &$posterOptions)
 		)
 	);
 
-	// Increase the number of posts and topics on the board.
+	cleantalk_after_create_topic($msgOptions, $topicOptions, $posterOptions);// Increase the number of posts and topics on the board.
 	if ($msgOptions['approved'])
 		$smcFunc['db_query']('', '
 			UPDATE {db_prefix}boards

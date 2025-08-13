@@ -2416,7 +2416,8 @@ function Post2()
 	// This is a new topic or an already existing one. Save it.
 	else
 	{
-		createPost($msgOptions, $topicOptions, $posterOptions);
+		cleantalk_check_message($msgOptions, $topicOptions, $posterOptions);
+            createPost($msgOptions, $topicOptions, $posterOptions);
 
 		if (isset($topicOptions['id']))
 			$topic = $topicOptions['id'];
