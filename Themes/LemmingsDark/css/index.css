@@ -161,6 +161,10 @@ div.cat_bar {
     background: #022;
 }
 
+tr.windowbg:hover {
+    background: #242;
+}
+
 .dropmenu li:hover li a, .dropmenu li li a {
     color: #ddd;
 }
