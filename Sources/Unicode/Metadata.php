@@ -8,13 +8,13 @@
  * @copyright 2025 Simple Machines and individual contributors
  * @license https://www.simplemachines.org/about/smf/license.php BSD
  *
- * @version 2.1.5
+ * @version 2.1.6
  */
 
 if (!defined('SMF'))
 	die('No direct access...');
 
 if (!defined('SMF_UNICODE_VERSION'))
-	define('SMF_UNICODE_VERSION', '16.0.0.0');
+	define('SMF_UNICODE_VERSION', '17.0.0.0');
 
 ?>
