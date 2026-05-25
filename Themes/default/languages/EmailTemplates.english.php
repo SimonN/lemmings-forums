@@ -794,7 +794,10 @@ $txt['admin_notify_approval_body'] = '{USERNAME} has just signed up as a new mem
 {PROFILELINK}
 
 Before this member can begin posting they must first have their account approved. Click the link below to go to the approval screen.
+
 {APPROVALLINK}
+{USER.cleantalkmessage}
+
 
 {REGARDS}';
 
